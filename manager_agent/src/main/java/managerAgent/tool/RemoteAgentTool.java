@@ -4,14 +4,21 @@ import com.alibaba.nacos.api.exception.NacosException;
 import io.agentscope.core.a2a.agent.A2aAgent;
 import io.agentscope.core.nacos.a2a.discovery.NacosAgentCardResolver;
 import io.agentscope.core.tool.Tool;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+import utils.AgentUtils;
 import utils.NacosUtil;
 
+@Slf4j
 //将远程智能体卡片封装为工具
 public class RemoteAgentTool {
     //基于A2A协议获取路线制定Agent
     @Tool(description = "从Nacos注册中心获取路线制定Agent")
-    public void callRouteMakingAgent() throws NacosException {
+    public String callRouteMakingAgent() throws NacosException {
 
+        log.info("============");
+        log.info("工具方法：路线制定智能体...正在调用中");
+        log.info("============");
 
         A2aAgent agent = A2aAgent.builder()
                 .name("RouteMakingAgent")
@@ -19,8 +26,17 @@ public class RemoteAgentTool {
                         //创建 Nacos 的 AgentCardResolver
                         new NacosAgentCardResolver(NacosUtil.getNacosClient()))
                 .build();
+
+        log.info("============");
+        log.info("获取到的远程Agent描述："+agent.getDescription());
+        log.info("============");
+
         //远程Agent运行
-        agent.call().block();
+        //agent.call().block();
+        String result = AgentUtils.streamResponse(agent, "调用百度地图MCP").blockLast()
+                .getMessage().getContent().toString();
+        log.info("RouteMakingAgent 返回结果: {}", result);
+        return result;
     }
 
     //基于A2A协议获取行程规划Agent

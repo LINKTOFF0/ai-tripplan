@@ -1,27 +1,28 @@
 package routeMakingAgent.agents;
 
 import io.agentscope.core.ReActAgent;
-import io.agentscope.core.a2a.server.AgentScopeA2aServer;
-import io.agentscope.core.a2a.server.card.ConfigurableAgentCard;
+import io.agentscope.core.tool.Toolkit;
+import org.springframework.context.annotation.Bean;
+import org.springframework.stereotype.Component;
+import routeMakingAgent.mcp.BaiduMapMCP;
 import utils.AgentUtils;
+import utils.ToolUtils;
 
 
+@Component
 public class RouteMakingAgent {
 
-    public void getRouteMakingAgent() {
-        //路线规划Agent Builder
-        ReActAgent.Builder builder = AgentUtils.getReActAgentBuilder(
-                "RouteMakingAgent",
-                "路线规划Agent"
-        );
-        //路线规划Agent 智能体卡片
-        ConfigurableAgentCard agentCard = new ConfigurableAgentCard.Builder()
-                .name("RouteMakingAgent")
-                .description("路线规划Agent")
-                .build();
+    @Bean
+    public ReActAgent getRouteMakingAgent() {
+        //Toolkit
+        ToolUtils toolUtils = new ToolUtils();
+        //将百度地图MCP注册到工具包
+        Toolkit toolkit = toolUtils.getToolkit(new BaiduMapMCP());
 
-        AgentScopeA2aServer.builder(builder)
-                .agentCard(agentCard)
-                .build();
+        //路线规划Agent Builder
+        return AgentUtils.getReActAgentBuilder(
+                        "RouteMakingAgent",
+                        "路线规划Agent"
+                ).toolkit(toolkit).build();
     }
 }

@@ -1,3 +1,7 @@
+server:
+  port: 8082
+
+# A2A协议服务端
 agentscope:
   a2a:
     server:

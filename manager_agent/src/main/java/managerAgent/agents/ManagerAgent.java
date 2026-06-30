@@ -2,6 +2,7 @@ package managerAgent.agents;
 
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.Event;
+import io.agentscope.core.plan.PlanNotebook;
 import io.agentscope.core.tool.Toolkit;
 import managerAgent.hook.planHook;
 import managerAgent.plan.TripPlan;
@@ -21,13 +22,15 @@ public class ManagerAgent {
         ToolUtils toolUtils = new ToolUtils();
         //将远程Agent封装为工具的封装注册到工具包
         Toolkit toolkit = toolUtils.getToolkit(new RemoteAgentTool());
+        //计划对象
+        PlanNotebook planNotebook = plan.getPlan();
 
         agent = AgentUtils.getReActAgentBuilder(
                         "ManagerAgent",
                         "主管Agent"
                 )
                 //.enablePlan()
-                .planNotebook(plan.getPlan())
+                .planNotebook(planNotebook)
                 //拦截器
                 .hook(new planHook())
                 .toolkit(toolkit)
@@ -35,17 +38,9 @@ public class ManagerAgent {
     }
 
     public void run() {
-        String prompt = """
-                   帮我制定2026年元旦,
-                   深圳到惠州3日游自驾游计划，
-                   请包含吃住行，天气，酒店，餐饮美食。
-                
-                   你可以调用以下Agent处理子任务
-                   - routeMaking Agent：擅长处理自驾游路线制定
-                   - tripPlanner Agent：擅长处理景点行程规划
-                
-                   -每个子任务要注明调用的Agent
-                
+        String prompt =
+                """
+                调用路线制定智能体
                 """;
         Flux<Event> stream = AgentUtils.streamResponse(agent, prompt);
         stream.doOnNext(msg -> System.out.println(msg.getMessage().getContent()))
