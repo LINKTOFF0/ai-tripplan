@@ -13,23 +13,27 @@ import java.util.List;
 
 //ReActAgent 工具类
 public class AgentUtils {
+
     //创建ReActAgent Builder
     public static ReActAgent.Builder getReActAgentBuilder(
             String name,
             String description
     ) {
 
+
+
         return ReActAgent.builder()
                 .name(name)
                 .description(description)
                 .model(DashScopeChatModel.builder()
                         //请求语言大模型的apikey
-                        .apiKey("sk-ws-H.RYIPIIL.ZpRK.MEQCIBaTgOAjRXCr8E_kPzGWeA1BYdHDuEnZTcMMb7vDy21dAiBUxjvldq_P6WjqTk5TtnBKhZBdCFY4uuPKga3k1dwk1w")
+                        .apiKey("你的API_KEY")
                         //所使用的语言大模型
                         .modelName("qwen3-max")
                         .stream(true)
                         .build())
                 ;
+
     }
 
     //ReActAgent流式响应

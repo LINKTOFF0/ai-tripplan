@@ -12,8 +12,8 @@ import utils.ToolUtils;
 
 import java.util.Set;
 
-@Slf4j
 @Component
+@Slf4j
 public class RouteMakingAgent {
 
     @Bean
@@ -21,27 +21,29 @@ public class RouteMakingAgent {
 
         BaiduMapMCP mcp = new BaiduMapMCP();
         //创建百度地图MCP客户端
-        mcp.getBaiduMapMcp();
+        mcp.getBaiduMapMCP();
         //初始化百度地图MCP客户端
         McpClientWrapper mcpClient = mcp.initBaiduMapMCP();
 
         //Toolkit
         ToolUtils toolUtils = new ToolUtils();
-        //将百度地图MCP注册到工具包
         Toolkit toolkit = toolUtils.getToolkit(mcpClient);
 
-        //打印挂载工具
+        //打印挂载的工具
         Set<String> toolNames = toolkit.getToolNames();
-        log.info("==========");
+        log.info("=============");
         toolNames.stream().forEach(
-                value -> log.info("已挂载工具：" + value)
+                value -> log.info("挂载的工具名称："+value)
         );
-        log.info("==========");
+        log.info("=============");
 
-        //路线规划Agent Builder 注入Nacos
+        //注入到Nacos
         return AgentUtils.getReActAgentBuilder(
                         "RouteMakingAgent",
-                        "路线规划Agent"
-                ).toolkit(toolkit).build();
+                        "擅长处理自驾游路线制定"
+                )
+                //工具包
+                .toolkit(toolkit)
+                .build();
     }
 }

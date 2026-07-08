@@ -1,3 +1,2 @@
-spring:
-  application:
-    name: manager_agent
+server:
+  port: 8081

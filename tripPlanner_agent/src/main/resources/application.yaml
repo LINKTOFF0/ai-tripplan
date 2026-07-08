@@ -1,6 +1,10 @@
 server:
   port: 8085
 
+spring:
+  config:
+    import: optional:file:.env[.properties]
+
 # A2A协议服务端
 agentscope:
   a2a:
@@ -8,3 +12,10 @@ agentscope:
       enabled: true
     nacos:
       server-addr: localhost:8848
+
+agent:
+  model_name: ${MODEL_NAME}
+  alibaba_dashscope_key: ${ALIBABA_DASH_SCOPE_KEY}
+
+mcp:
+  baidu_map_addr: ${BAIDU_MAP_ADDR}

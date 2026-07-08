@@ -44,6 +44,10 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
+# ====== Env ======
+.env
+.env.*
+
 # ====== Misc ======
 *.swp
 *.~

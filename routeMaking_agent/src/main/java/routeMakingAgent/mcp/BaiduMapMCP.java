@@ -1,12 +1,12 @@
 package routeMakingAgent.mcp;
 
-import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.mcp.McpClientBuilder;
 import io.agentscope.core.tool.mcp.McpClientWrapper;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
 import java.util.Optional;
+
 
 @Slf4j
 public class BaiduMapMCP {
@@ -16,34 +16,35 @@ public class BaiduMapMCP {
     //MCP 客户端初始化
     private boolean mcpInitialized = false;
 
-    @Tool(description = "百度地图MCP Server")
-    public void getBaiduMapMcp() {
-        /*log.info("==================");
-        log.info("正在调用百度地图MCP....");
-        log.info("==================");*/
+    //@Tool(description = "百度地图MCP Server")
+    public void getBaiduMapMCP() {
 
+//       log.info("==================");
+//       log.info("正在调用百度地图MCP....");
+//       log.info("==================");
 
         //创建MCP客户端
         baiduMapMCP = McpClientBuilder.create("BaiduMap-mcp")
                 //和MCP Server以SSE方式进行通信
-                .sseTransport("https://mcp.api-inference.modelscope.net/3b600337610244/sse")
+                .sseTransport("你的MCP地址")
                 //请求超时
                 .timeout(Duration.ofSeconds(120))
                 //异步请求
                 .buildAsync()
                 .block();
+
     }
 
     public McpClientWrapper initBaiduMapMCP() {
+
         //通过Optional判断百度MCP客户端是否为null
         Optional<McpClientWrapper> mcpClientWrapper = Optional.ofNullable(baiduMapMCP);
-        if (mcpClientWrapper.isPresent()) {
+        if(mcpClientWrapper.isPresent()) {
             log.info("==================");
             log.info("百度MCP客户端已经创建");
             log.info("==================");
 
-
-            if (!mcpInitialized) {
+            if(!mcpInitialized) {
                 synchronized (this) {
                     if (!mcpInitialized) {
 
@@ -51,7 +52,7 @@ public class BaiduMapMCP {
                         baiduMapMCP.initialize().block();
 
                         //获取MCP服务端工具列表
-                        if (baiduMapMCP.isInitialized()) {
+                        if(baiduMapMCP.isInitialized()) {
 
                             log.info("=============");
                             log.info("百度地图MCP 客户端初始化成功！");
@@ -63,7 +64,7 @@ public class BaiduMapMCP {
                                 log.info("==================");
                             });
 
-                            mcpInitialized = true;
+                            mcpInitialized=true;
                         }
 
                     }

@@ -4,10 +4,13 @@ import com.alibaba.nacos.api.PropertyKeyConst;
 import com.alibaba.nacos.api.ai.AiFactory;
 import com.alibaba.nacos.api.ai.AiService;
 import com.alibaba.nacos.api.exception.NacosException;
+import org.springframework.stereotype.Component;
 
 import java.util.Properties;
 
+@Component
 public class NacosUtil {
+
     public static AiService getNacosClient() throws NacosException {
 
         // 设置 Nacos 地址
