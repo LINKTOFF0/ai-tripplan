@@ -20,16 +20,22 @@ public class AgentUtils {
             String description
     ) {
 
-
+        // 从环境变量读取 API Key 和模型名称，避免硬编码
+        String apiKey = System.getenv().getOrDefault(
+                "ALIBABA_DASHCOPE_KEY",
+                "your-api-key-placeholder");
+        String modelName = System.getenv().getOrDefault(
+                "MODEL_NAME",
+                "qwen3-max");
 
         return ReActAgent.builder()
                 .name(name)
                 .description(description)
                 .model(DashScopeChatModel.builder()
                         //请求语言大模型的apikey
-                        .apiKey("你的API_KEY")
+                        .apiKey(apiKey)
                         //所使用的语言大模型
-                        .modelName("qwen3-max")
+                        .modelName(modelName)
                         .stream(true)
                         .build())
                 ;

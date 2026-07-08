@@ -47,6 +47,7 @@ Desktop.ini
 # ====== Env ======
 .env
 .env.*
+!.env.example
 
 # ====== Misc ======
 *.swp

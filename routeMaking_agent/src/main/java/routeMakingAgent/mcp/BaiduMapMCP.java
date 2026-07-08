@@ -23,10 +23,15 @@ public class BaiduMapMCP {
 //       log.info("正在调用百度地图MCP....");
 //       log.info("==================");
 
+        // 从环境变量读取 MCP Server 地址，避免硬编码
+        String mcpAddr = System.getenv().getOrDefault(
+                "BAIDU_MAP_ADDR",
+                "your-baidu-map-mcp-endpoint");
+
         //创建MCP客户端
         baiduMapMCP = McpClientBuilder.create("BaiduMap-mcp")
                 //和MCP Server以SSE方式进行通信
-                .sseTransport("你的MCP地址")
+                .sseTransport(mcpAddr)
                 //请求超时
                 .timeout(Duration.ofSeconds(120))
                 //异步请求
