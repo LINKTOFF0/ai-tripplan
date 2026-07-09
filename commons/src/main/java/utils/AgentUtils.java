@@ -20,13 +20,16 @@ public class AgentUtils {
             String description
     ) {
 
-        // 从环境变量读取 API Key 和模型名称，避免硬编码
-        String apiKey = System.getenv().getOrDefault(
-                "ALIBABA_DASHCOPE_KEY",
-                "your-api-key-placeholder");
-        String modelName = System.getenv().getOrDefault(
-                "MODEL_NAME",
-                "qwen3-max");
+        // 从环境变量/系统属性读取 API Key 和模型名称，避免硬编码
+        // 优先级：OS 环境变量 > 系统属性（-D 参数或 .env 加载）
+        String apiKey = System.getenv("DASHSCOPE_API_KEY");
+        if (apiKey == null || apiKey.isBlank()) {
+            apiKey = System.getProperty("DASHSCOPE_API_KEY", "your-api-key-placeholder");
+        }
+        String modelName = System.getenv("MODEL_NAME");
+        if (modelName == null || modelName.isBlank()) {
+            modelName = System.getProperty("MODEL_NAME", "qwen3-max");
+        }
 
         return ReActAgent.builder()
                 .name(name)
@@ -60,5 +63,26 @@ public class AgentUtils {
                         ))
                         .build()
         );
+    }
+
+    //ReActAgent结构化输出调用
+    public static <T> Msg callWithStructuredOutput(
+            AgentBase agent,
+            String prompt,
+            Class<T> outputClass) {
+
+        return agent.call(
+                        //消息列表
+                        List.of(Msg.builder()
+                                .role(MsgRole.USER)
+                                .content(List.of(
+                                        TextBlock.builder()
+                                                .text(prompt)
+                                                .build()
+                                ))
+                                .build()),
+                        //结构化输出类型
+                        outputClass)
+                .block();
     }
 }

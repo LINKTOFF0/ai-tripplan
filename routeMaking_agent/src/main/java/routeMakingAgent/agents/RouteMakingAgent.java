@@ -4,6 +4,7 @@ import io.agentscope.core.ReActAgent;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.core.tool.mcp.McpClientWrapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
 import routeMakingAgent.mcp.BaiduMapMCP;
@@ -16,8 +17,16 @@ import java.util.Set;
 @Slf4j
 public class RouteMakingAgent {
 
+    @Value("${mcp.baidu_map_addr:#{null}}")
+    private String baiduMapAddr;
+
     @Bean
     public ReActAgent getRouteMakingAgent() {
+
+        // 将 Spring 属性注入到系统属性，供 BaiduMapMCP 读取
+        if (baiduMapAddr != null && !baiduMapAddr.isBlank()) {
+            System.setProperty("BAIDU_MAP_ADDR", baiduMapAddr);
+        }
 
         BaiduMapMCP mcp = new BaiduMapMCP();
         //创建百度地图MCP客户端

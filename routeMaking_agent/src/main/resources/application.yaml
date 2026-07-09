@@ -1,6 +1,14 @@
 server:
   port: 8082
 
+spring:
+  config:
+    import: optional:file:.env[.properties]
+
+# MCP 配置
+mcp:
+  baidu_map_addr: ${BAIDU_MAP_ADDR}
+
 # A2A协议服务端
 agentscope:
   a2a:

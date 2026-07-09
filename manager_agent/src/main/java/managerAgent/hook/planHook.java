@@ -3,7 +3,6 @@ package managerAgent.hook;
 import io.agentscope.core.agent.user.UserAgent;
 import io.agentscope.core.hook.*;
 import io.agentscope.core.plan.PlanNotebook;
-import io.agentscope.core.plan.model.Plan;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
@@ -20,9 +19,7 @@ public class planHook implements Hook {
         this.user = UserAgent.builder()
                 .name("User")
                 .build();
-
         this.plan = planNotebook;
-
     }
 
     @Override
@@ -42,17 +39,25 @@ public class planHook implements Hook {
             case PostReasoningEvent e -> {
 
                 String reason = e.getReasoningMessage().getTextContent();
-                log.info("#### 思考过程：#######" );
-                log.info(reason);
-
-                //当计划列表已生成
+                if (reason != null) {
+                    log.info("#######思考过程：#######");
+                    log.info(reason);
+                    log.info("######################");
+                }
+            }
+/*                //当计划列表已生成
                 Plan currentPlan = plan.getCurrentPlan();
                 if (currentPlan != null) {
-                    System.out.println("请输入修改意见: ");
-                    user.call().block();
+                    System.out.println("请输入修改意见（10秒内无输入则自动继续）: ");
+                    user.call()
+                            .timeout(Duration.ofSeconds(10))
+                            .onErrorResume(TimeoutException.class, err -> {
+                                System.out.println("超时未收到输入，自动继续执行...");
+                                return Mono.empty();
+                            })
+                            .block();
                 }
-
-            }
+            }*/
             //调用工具事件
             case PostActingEvent e -> {
 

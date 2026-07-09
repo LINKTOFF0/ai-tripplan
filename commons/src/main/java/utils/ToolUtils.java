@@ -3,11 +3,6 @@ package utils;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.core.tool.mcp.McpClientWrapper;
 
-/**
- * author: lin
- * description: Agent Tool 工具类
- * date: 2026
- */
 public class ToolUtils {
     private final Toolkit toolkit;
 

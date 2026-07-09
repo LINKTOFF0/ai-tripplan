@@ -2,10 +2,14 @@ package tripPlannerAgent;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import utils.EnvUtils;
 
 @SpringBootApplication
 public class TripPlannerAgentApplication {
     public static void main(String[] args) {
-       SpringApplication.run(TripPlannerAgentApplication.class, args);
+        // 从 classpath 加载 .env 文件到系统属性
+        EnvUtils.loadEnv();
+
+        SpringApplication.run(TripPlannerAgentApplication.class, args);
     }
 }

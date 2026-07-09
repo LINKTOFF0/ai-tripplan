@@ -16,17 +16,33 @@ public class BaiduMapMCP {
     //MCP 客户端初始化
     private boolean mcpInitialized = false;
 
+    /**
+     * 获取 MCP Server 地址，优先级：系统环境变量 > 系统属性 > 默认值
+     */
+    private String getMcpAddr() {
+        // 1. 优先从 OS 环境变量读取
+        String addr = System.getenv("BAIDU_MAP_ADDR");
+        if (addr != null && !addr.isBlank()) {
+            log.info("从环境变量 BAIDU_MAP_ADDR 读取 MCP 地址: {}", addr);
+            return addr;
+        }
+        // 2. 回退到系统属性（可通过 -D 参数或 Spring 配置注入）
+        addr = System.getProperty("BAIDU_MAP_ADDR");
+        if (addr != null && !addr.isBlank()) {
+            log.info("从系统属性 BAIDU_MAP_ADDR 读取 MCP 地址: {}", addr);
+            return addr;
+        }
+        // 3. 默认值（会报错，提示用户配置）
+        throw new IllegalStateException(
+                "未配置 BAIDU_MAP_ADDR！请设置环境变量 BAIDU_MAP_ADDR 或通过 -DBAIDU_MAP_ADDR=<url> 启动应用");
+    }
+
     //@Tool(description = "百度地图MCP Server")
     public void getBaiduMapMCP() {
 
-//       log.info("==================");
-//       log.info("正在调用百度地图MCP....");
-//       log.info("==================");
+        String mcpAddr = getMcpAddr();
 
-        // 从环境变量读取 MCP Server 地址，避免硬编码
-        String mcpAddr = System.getenv().getOrDefault(
-                "BAIDU_MAP_ADDR",
-                "your-baidu-map-mcp-endpoint");
+        log.info("正在连接百度地图 MCP Server: {}", mcpAddr);
 
         //创建MCP客户端
         baiduMapMCP = McpClientBuilder.create("BaiduMap-mcp")
