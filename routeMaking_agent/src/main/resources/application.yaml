@@ -7,7 +7,7 @@ spring:
 
 # MCP 配置
 mcp:
-  baidu_map_addr: ${BAIDU_MAP_ADDR}
+  amap_addr: ${AMAP_MAP_ADDR}
 
 # A2A协议服务端
 agentscope:

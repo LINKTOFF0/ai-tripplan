@@ -18,4 +18,4 @@ agent:
   alibaba_dashscope_key: ${ALIBABA_DASH_SCOPE_KEY}
 
 mcp:
-  baidu_map_addr: ${BAIDU_MAP_ADDR}
+  amap_addr: ${AMAP_MAP_ADDR}

@@ -1,40 +1,40 @@
 package tripPlannerAgent.agents;
 
 import io.agentscope.core.ReActAgent;
+import io.agentscope.core.skill.AgentSkill;
+import io.agentscope.core.skill.SkillBox;
+import io.agentscope.core.skill.util.JarSkillRepositoryAdapter;
 import io.agentscope.core.tool.Toolkit;
 import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
 import utils.AgentUtils;
 
 import java.io.IOException;
-import java.net.URISyntaxException;
 
 
 @Component
 public class TripPlannerAgent {
 
     @Bean
-    public ReActAgent getTripPlannerAgent() throws URISyntaxException, IOException {
+    public ReActAgent getTripPlannerAgent() throws IOException {
 
         Toolkit toolkit = new Toolkit();
+        SkillBox skillBox = new SkillBox(toolkit);
+        JarSkillRepositoryAdapter repo = new JarSkillRepositoryAdapter("skills");
 
-        SuggestSightAgent suggestSightAgent = new SuggestSightAgent();
+        // 直接加载技能作为工具，避免 subAgent 导致的 pending tool call 问题
+        AgentSkill suggestSights = repo.getSkill("Suggest-Sights");
+        skillBox.registerSkill(suggestSights);
 
-        TableMakerAgent tableMakerAgent = new TableMakerAgent();
+        AgentSkill makeTable = repo.getSkill("Make-A-Table");
+        skillBox.registerSkill(makeTable);
 
-        //将智能体(子Agent)作为工具
-        toolkit.registration()
-                .subAgent(suggestSightAgent::getSuggestSightAgent)
-                .subAgent(tableMakerAgent::getTableMakerAgent)
-                .apply();
-
-        //行程规划Agent Builder
-        ReActAgent.Builder builder = AgentUtils.getReActAgentBuilder(
+        return AgentUtils.getReActAgentBuilder(
                         "TripPlannerAgent",
-                        "擅长处理景点行程规划"
+                        "你是行程规划专家。规划前必须先用 weather_check 脚本查目的地天气，所有数据整理后用 recalc 脚本生成表格。严禁编造天气和景点信息。"
                 )
-                //挂载工具包
-                .toolkit(toolkit);
-        return builder.build();
+                .toolkit(toolkit)
+                .skillBox(skillBox)
+                .build();
     }
 }

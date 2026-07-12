@@ -7,7 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
-import routeMakingAgent.mcp.BaiduMapMCP;
+import routeMakingAgent.mcp.AmapMCP;
 import utils.AgentUtils;
 import utils.ToolUtils;
 
@@ -17,22 +17,22 @@ import java.util.Set;
 @Slf4j
 public class RouteMakingAgent {
 
-    @Value("${mcp.baidu_map_addr:#{null}}")
-    private String baiduMapAddr;
+    @Value("${mcp.amap_addr:#{null}}")
+    private String amapAddr;
 
     @Bean
     public ReActAgent getRouteMakingAgent() {
 
-        // 将 Spring 属性注入到系统属性，供 BaiduMapMCP 读取
-        if (baiduMapAddr != null && !baiduMapAddr.isBlank()) {
-            System.setProperty("BAIDU_MAP_ADDR", baiduMapAddr);
+        // 将 Spring 属性注入到系统属性，供 AmapMCP 读取
+        if (amapAddr != null && !amapAddr.isBlank()) {
+            System.setProperty("AMAP_MAP_ADDR", amapAddr);
         }
 
-        BaiduMapMCP mcp = new BaiduMapMCP();
-        //创建百度地图MCP客户端
-        mcp.getBaiduMapMCP();
-        //初始化百度地图MCP客户端
-        McpClientWrapper mcpClient = mcp.initBaiduMapMCP();
+        AmapMCP mcp = new AmapMCP();
+        //创建高德地图MCP客户端
+        mcp.getAmapMCP();
+        //初始化高德地图MCP客户端
+        McpClientWrapper mcpClient = mcp.initAmapMCP();
 
         //Toolkit
         ToolUtils toolUtils = new ToolUtils();
@@ -49,7 +49,7 @@ public class RouteMakingAgent {
         //注入到Nacos
         return AgentUtils.getReActAgentBuilder(
                         "RouteMakingAgent",
-                        "擅长处理自驾游路线制定"
+                        "路线规划专家，可使用高德地图工具查询：驾车/铁路/公交/步行/骑行路线、距离耗时、地理编码、POI搜索、天气、IP定位。你有实时地图数据，必须提供具体的路线信息"
                 )
                 //工具包
                 .toolkit(toolkit)
