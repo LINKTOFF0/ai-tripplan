@@ -2,12 +2,11 @@ package routeMakingAgent.agents;
 
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.tool.Toolkit;
-import io.agentscope.core.tool.mcp.McpClientWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
-import routeMakingAgent.mcp.AmapMCP;
+import utils.MapTools;
 import utils.AgentUtils;
 import utils.ToolUtils;
 
@@ -20,23 +19,19 @@ public class RouteMakingAgent {
     @Value("${mcp.amap_addr:#{null}}")
     private String amapAddr;
 
+    @Bean(destroyMethod = "close")
+    public MapTools routeMapTools() {
+        return new MapTools(amapAddr, Set.of("route"));
+    }
+
     @Bean
-    public ReActAgent getRouteMakingAgent() {
+    public ReActAgent getRouteMakingAgent(MapTools routeMapTools) {
 
-        // 将 Spring 属性注入到系统属性，供 AmapMCP 读取
-        if (amapAddr != null && !amapAddr.isBlank()) {
-            System.setProperty("AMAP_MAP_ADDR", amapAddr);
-        }
 
-        AmapMCP mcp = new AmapMCP();
-        //创建高德地图MCP客户端
-        mcp.getAmapMCP();
-        //初始化高德地图MCP客户端
-        McpClientWrapper mcpClient = mcp.initAmapMCP();
 
         //Toolkit
         ToolUtils toolUtils = new ToolUtils();
-        Toolkit toolkit = toolUtils.getToolkit(mcpClient);
+        Toolkit toolkit = toolUtils.getToolkit(routeMapTools);
 
         //打印挂载的工具
         Set<String> toolNames = toolkit.getToolNames();
@@ -49,7 +44,7 @@ public class RouteMakingAgent {
         //注入到Nacos
         return AgentUtils.getReActAgentBuilder(
                         "RouteMakingAgent",
-                        "路线规划专家，可使用高德地图工具查询：驾车/铁路/公交/步行/骑行路线、距离耗时、地理编码、POI搜索、天气、IP定位。你有实时地图数据，必须提供具体的路线信息"
+                        "你是线路优化专家，只负责已确认地点的路线比较和排序。需要真实距离或时间时先用listMapTools查看route类别，再调用callMapTool。只查询受影响路段，尊重每段交通偏好。缺坐标时由主管确认地点。失败时说明数据不可用，不编造、不重复探针。"
                 )
                 //工具包
                 .toolkit(toolkit)

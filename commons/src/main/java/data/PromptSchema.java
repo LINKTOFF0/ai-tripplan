@@ -7,4 +7,8 @@ import lombok.Setter;
 @Setter
 public class PromptSchema {
     private String prompt;
+    private JourneyPlanDto journeyPlan;
+    private String activeDayId;
+    private java.util.List<ConversationMessageDto> history;
+    private String task;
 }

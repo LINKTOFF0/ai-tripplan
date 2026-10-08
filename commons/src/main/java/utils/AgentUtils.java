@@ -24,6 +24,7 @@ public class AgentUtils {
         return ReActAgent.builder()
                 .name(name)
                 .description(description)
+                .sysPrompt(description)
                 .model(OpenAIChatModel.builder()
                         .apiKey(requireConfig("DEEPSEEK_API_KEY"))
                         .baseUrl(getConfig("DEEPSEEK_BASE_URL", "https://api.deepseek.com"))

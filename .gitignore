@@ -56,3 +56,9 @@ nacos-data/
 *.bak
 *.tmp
 *~
+
+# Rebuild frontend assets from source; do not publish environment-bound bundles.
+manager_agent/src/main/resources/static/
+node_modules/
+*.tsbuildinfo
+*.jpg

@@ -36,9 +36,9 @@ public class RemoteAgentTool {
         return tripPlannerCalled;
     }
 
-    @Tool(description = "路线规划专家，提供：驾车/铁路/飞机路线、距离、耗时、交通方式对比。必须调用此工具获取任何交通路线信息，严禁自行编造车次和航班或路线")
+    @Tool(description = "仅用于多个已选地点的线路比较与排序优化。单段交通可直接使用公共地图工具，不需要调用此智能体。不提供未核实的铁路车次或航班。")
     public synchronized String callRouteMakingAgent(
-            @ToolParam(name = "prompt",description = "路线查询需求，包含起点、终点、出行方式（铁路/自驾/飞机等）")
+            @ToolParam(name = "prompt",description = "已确认地点、坐标、起点约束及每段交通偏好")
             String prompt) throws NacosException {
         log.info("============");
         log.info("工具方法：路线制定智能体...正在调用中");
@@ -69,7 +69,7 @@ public class RemoteAgentTool {
                 : responseText;
     }
 
-    @Tool(description = "行程规划专家，提供：每日景点安排、美食推荐、住宿建议、天气参考。获取路线后必须调用此工具完成行程细节规划")
+    @Tool(description = "仅在用户要求新建或整体重规划时调用，依据偏好和已确认地点输出每日行程。天气、单段路线与已有卡片局部编辑不调用此工具。")
     public synchronized String callTripPlannerAgent(
             @ToolParam(name = "prompt",description = "行程规划需求，包含目的地、天数、偏好、路线信息等")
             String prompt) throws NacosException {

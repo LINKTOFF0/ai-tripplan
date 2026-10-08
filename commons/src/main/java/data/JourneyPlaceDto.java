@@ -19,6 +19,12 @@ public class JourneyPlaceDto {
     public Integer durationMinutes;
     @JsonPropertyDescription("简短的地点安排说明")
     public String description;
+    public String note;
+    public String advice;
+    public Double longitude;
+    public Double latitude;
+    public String locationStatus;
+    public String icon;
 
     public JourneyPlaceDto() {}
 }

@@ -89,7 +89,7 @@ public class ManagerAgentController {
         if ("__ping__".equals(input.getPrompt())) {
             return Flux.just("{\"type\":\"DONE\",\"text\":\"pong\",\"isLast\":true}");
         }
-        return managerAgent.stream(input.getPrompt());
+        return managerAgent.stream(input);
     }
 
     /**

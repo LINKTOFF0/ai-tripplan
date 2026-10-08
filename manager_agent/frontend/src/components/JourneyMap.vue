@@ -2,9 +2,11 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useJourneyStore } from '@/stores/journey'
 import type { JourneyPlace, Recommendation } from '@/types/journey'
+import { normalizeRoute, routeKey, type TravelMode, type TravelRoute } from '@/utils/travelRoutes'
+import { poiKind } from '@/utils/poiCategory'
 
-const props = defineProps<{ category: Recommendation['kind'] | null; recommendationsOpen?: boolean }>()
-const emit = defineEmits<{ toast: [message: string]; recommendations: [items: Recommendation[]] }>()
+const props = defineProps<{ category: Recommendation['kind'] | null; recommendationsOpen?: boolean; travelPreferences: Record<string, TravelMode> }>()
+const emit = defineEmits<{ toast: [message: string]; recommendations: [items: Recommendation[]]; routes: [items: Record<string, TravelRoute>]; weather: [item: { status: string; temperature?: string; weather?: string; city?: string; reportTime?: string }] }>()
 const store = useJourneyStore()
 const mapElement = ref<HTMLDivElement>()
 let map: any
@@ -58,8 +60,46 @@ function chooseLocation(poi: any) {
   void redraw()
 }
 const routeCache = new Map<string, Promise<any>>()
+let routeQueue: Promise<unknown> = Promise.resolve()
+const failedRoutes = new Map<string, number>()
+let disposed = false
+let routeResults: Record<string, TravelRoute> = {}
 const cityCenterCache = new Map<string, Promise<[number, number] | null>>()
+const transitCities = new Map<string, Promise<string>>()
+function transitCity(city: string): Promise<string> {
+  if (!transitCities.has(city)) transitCities.set(city, new Promise(resolve => {
+    const timer = setTimeout(() => resolve(city), 10000)
+    new AMap.Geocoder().getLocation(city, (status: string, result: any) => {
+      clearTimeout(timer)
+      resolve(status === 'complete' ? String(result?.geocodes?.[0]?.citycode || city) : city)
+    })
+  }))
+  return transitCities.get(city)!
+}
 let renderVersion = 0
+let weatherVersion = 0
+async function refreshWeather() {
+  const version = ++weatherVersion
+  emit('weather', { status: 'loading' })
+  if (!AMap) return
+  const city = store.plan.destination
+  const result = await new Promise<any>(resolve => {
+    const timer = setTimeout(() => resolve(null), 10000)
+    const finish = (data: any) => { clearTimeout(timer); resolve(data) }
+    try {
+      new AMap.Geocoder().getLocation(city, (status: string, response: any) => {
+        if (status !== 'complete') return finish(null)
+        const adcode = response?.geocodes?.[0]?.adcode
+        if (!adcode) return finish(null)
+        new AMap.Weather().getLive(adcode, (error: any, data: any) => finish(error ? null : data))
+      })
+    } catch { finish(null) }
+  })
+  if (version !== weatherVersion) return
+  emit('weather', result && result.temperature != null && Number.isFinite(Number(result.temperature)) && result.weather && result.reportTime
+    ? { status: 'ready', temperature: String(result.temperature), weather: result.weather, city: result.city, reportTime: result.reportTime }
+    : { status: 'unavailable' })
+}
 let resizeObserver: ResizeObserver | undefined
 let recommendationMarkers: any[] = []
 let currentRecommendations: Recommendation[] = []
@@ -71,20 +111,22 @@ const mapX = (longitude: number) => 12 + ((longitude - 113.28) / 0.04) * 76
 const mapY = (latitude: number) => 12 + (1 - (latitude - 22.8) / 0.05) * 76
 
 async function initMap() {
-  if (!amapEnabled || !mapElement.value) return
+  if (!amapEnabled || !mapElement.value) { emit('weather', { status: 'unavailable' }); return }
   try {
     ;(window as any)._AMapSecurityConfig = { serviceHost: `${window.location.origin}/_AMapService` }
     const { default: AMapLoader } = await import('@amap/amap-jsapi-loader')
-    AMap = await AMapLoader.load({ key: __AMAP_KEY__, version: '2.0', plugins: ['AMap.Scale', 'AMap.ToolBar', 'AMap.Geocoder', 'AMap.Walking', 'AMap.Driving', 'AMap.PlaceSearch'] })
+    AMap = await AMapLoader.load({ key: __AMAP_KEY__, version: '2.0', plugins: ['AMap.Scale', 'AMap.ToolBar', 'AMap.Geocoder', 'AMap.Walking', 'AMap.Driving', 'AMap.Riding', 'AMap.Transfer', 'AMap.PlaceSearch', 'AMap.Weather'] })
     map = new AMap.Map(mapElement.value, { zoom: 13, center: [113.295, 22.836], mapStyle: 'amap://styles/whitesmoke', viewMode: '2D', showLabel: true })
     map.addControl(new AMap.Scale({ position: 'RB', offset: [12, 100] }))
     map.addControl(new AMap.ToolBar({ position: 'RB' }))
     mapReady.value = true
+    void refreshWeather()
     map.on('moveend', scheduleRecommendationSearch)
     await geocodePendingPlaces()
     await redraw()
     scheduleRecommendationSearch()
   } catch {
+    emit('weather', { status: 'unavailable' })
     emit('toast', '高德地图加载失败，已切换到路线示意图')
   }
 }
@@ -122,7 +164,16 @@ async function geocodePendingPlaces() {
   }
 }
 function searchRoute(service: any, from: [number, number], to: [number, number]): Promise<any> {
-  return new Promise(resolve => service.search(new AMap.LngLat(...from), new AMap.LngLat(...to), (status: string, result: any) => resolve(status === 'complete' ? result : null)))
+  return new Promise(resolve => {
+    const timer = setTimeout(() => resolve(null), 10000)
+    try {
+      service.search(new AMap.LngLat(...from), new AMap.LngLat(...to), (status: string, result: any) => {
+        clearTimeout(timer)
+        if (status !== 'complete') console.warn('Route query failed:', status, typeof result === 'string' ? result : result?.info)
+        resolve(status === 'complete' ? result : { info: typeof result === 'string' ? result : result?.info })
+      })
+    } catch { clearTimeout(timer); resolve(null) }
+  })
 }
 const poiCategories = [
   { kind: 'attraction', label: '游玩', type: '风景名胜', keyword: '景点' },
@@ -148,15 +199,7 @@ function scheduleRecommendationSearch() {
   searchTimer = setTimeout(() => { void searchVisibleRecommendations() }, 350)
 }
 function isAllowedPoi(poi: any, category: typeof poiCategories[number]) {
-  const type = String(poi.type || poi.typecode || '')
-  const name = String(poi.name || '')
-  const text = `${type} ${name}`
-  if (/购物|商场|商城|百货|零售|商业广场|购物中心/.test(text)) return false
-  if (type) {
-    const allowedType = category.kind === 'attraction' ? type.startsWith('风景名胜') : category.kind === 'food' ? type.startsWith('餐饮服务') : type.startsWith('住宿服务')
-    if (!allowedType) return false
-  }
-  return true
+  return poiKind(poi) === category.kind
 }
 async function searchVisibleRecommendations() {
   if (!map || !AMap) return
@@ -245,6 +288,48 @@ function distanceInMeters(distance: string) {
   const value = Number.parseFloat(distance)
   return distance.endsWith('km') ? value * 1000 : value
 }
+async function queryTravel(fromPlace: JourneyPlace, toPlace: JourneyPlace, mode: TravelMode): Promise<TravelRoute> {
+  const key = routeKey(fromPlace, toPlace, mode)
+  if (fromPlace.locationStatus !== 'matched' || toPlace.locationStatus !== 'matched' || !AMap) return { status: 'unavailable' }
+  if (routeResults[key]?.status === 'ready') return routeResults[key]
+  if (Date.now() - (failedRoutes.get(key) ?? 0) < 30000) return routeResults[key] ?? { status: 'unavailable' }
+  routeResults = { ...routeResults, [key]: { status: 'loading' } }
+  emit('routes', routeResults)
+  if (!routeCache.has(key)) {
+    if (routeCache.size > 200) routeCache.clear()
+    const task = routeQueue.then(async () => {
+      if (disposed) return null
+      if (!store.plan.days.some(day => day.places.some((place, index) => day.places[index + 1] && routeKey(place, day.places[index + 1], mode) === key))) return null
+      const originCity = fromPlace.city || store.plan.destination
+      const destinationCity = toPlace.city || store.plan.destination
+      const city = mode === 'transit' ? await transitCity(originCity) : originCity
+      const cityd = mode === 'transit' ? await transitCity(destinationCity) : destinationCity
+      const Service = { walking: AMap.Walking, cycling: AMap.Riding, driving: AMap.Driving, transit: AMap.Transfer }[mode]
+      try {
+        return await searchRoute(new Service({ map: null, hideMarkers: true, city, cityd }), [fromPlace.longitude, fromPlace.latitude], [toPlace.longitude, toPlace.latitude])
+      } catch { return null }
+    }).catch(() => null)
+    routeQueue = task.then(() => new Promise(resolve => setTimeout(resolve, 700)), () => undefined)
+    routeCache.set(key, task)
+  }
+  const normalized = normalizeRoute(await routeCache.get(key), mode)
+  if (disposed) return normalized
+  const validPair = store.plan.days?.some(day => day.places.some((place, index) => day.places[index + 1] && routeKey(place, day.places[index + 1], mode) === key))
+  if (validPair) {
+    routeResults = { ...routeResults, [key]: normalized }
+    emit('routes', routeResults)
+  }
+  if (normalized.status !== 'ready') { failedRoutes.set(key, Date.now()); routeCache.delete(key) }
+  return normalized
+}
+async function requestAlternatives(fromId: string, toId: string) {
+  const places = store.places
+  const index = places.findIndex(place => place.id === fromId)
+  const from = places[index]
+  const to = places[index + 1]
+  if (!from || !to || to.id !== toId) return
+  await Promise.all((['walking', 'cycling', 'driving', 'transit'] as const).map(mode => queryTravel(from, to, mode)))
+}
 async function redraw() {
   if (!map || !AMap) return
   const version = ++renderVersion
@@ -254,6 +339,11 @@ async function redraw() {
   routeLines.forEach(line => line.setMap(null))
   routeLines = []
   const currentPlaces = store.places
+  const days = store.plan.days ?? [{ places: currentPlaces }]
+  const currentKeys = new Set(days.flatMap(day => day.places.slice(0, -1).flatMap((place, index) =>
+    (['walking', 'cycling', 'driving', 'transit'] as const).map(mode => routeKey(place, day.places[index + 1], mode)))))
+  routeResults = Object.fromEntries(Object.entries(routeResults).filter(([key]) => currentKeys.has(key)))
+  emit('routes', routeResults)
   store.places.forEach((place, index) => {
     if (place.locationStatus !== 'matched') return
     const position: [number, number] = [place.longitude, place.latitude]
@@ -263,23 +353,22 @@ async function redraw() {
     markers.push(marker)
     markerByPlace.set(place.id, marker)
   })
-  const located = currentPlaces
+  // Finish the visible day first; other days contribute metrics, not map geometry.
+  const groups = [currentPlaces, ...days.map(day => day.places).filter(places => places !== currentPlaces)]
+  for (const located of groups) {
   for (let i = 0; i < located.length - 1; i++) {
     if (located[i].locationStatus !== 'matched' || located[i + 1].locationStatus !== 'matched') continue
-    const from: [number, number] = [located[i].longitude, located[i].latitude]
-    const to: [number, number] = [located[i + 1].longitude, located[i + 1].latitude]
-    const Service = located[i].category === 'transport' ? AMap.Driving : AMap.Walking
-    const key = `${Service === AMap.Driving ? 'drive' : 'walk'}:${from.join(',')}:${to.join(',')}`
-    if (!routeCache.has(key)) routeCache.set(key, searchRoute(new Service({ map: null, hideMarkers: true }), from, to))
-    const result = await routeCache.get(key)
+    const mode = props.travelPreferences[`${located[i].id}:${located[i + 1].id}`] ?? 'walking'
+    const normalized = await queryTravel(located[i], located[i + 1], mode)
     if (version !== renderVersion) return
-    const steps = result?.routes?.[0]?.steps ?? []
-    const path = steps.flatMap((step: any) => step.path ?? []).map((point: any) => [point.lng, point.lat])
-    if (path.length) {
+    const path = normalized.path ?? []
+    if (path.length && located === currentPlaces) {
       const line = new AMap.Polyline({ path, strokeColor: '#24a9e8', strokeWeight: 6, strokeOpacity: 0.92, lineJoin: 'round', lineCap: 'round', showDir: true })
       line.setMap(map)
       routeLines.push(line)
     }
+  }
+  if (located === currentPlaces) fitDayRoute()
   }
   fitDayRoute()
   nextTick(() => map?.resize())
@@ -338,8 +427,10 @@ async function prepareRouteOptimization() {
   await redraw()
   return store.places.every(place => place.locationStatus === 'matched')
 }
-defineExpose({ recenter, focusPlace, focusRecommendation, refreshRecommendations, prepareRouteOptimization })
+defineExpose({ recenter, focusPlace, focusRecommendation, refreshRecommendations, prepareRouteOptimization, requestAlternatives })
 watch(() => props.category, () => drawRecommendationMarkers())
+watch(() => store.plan.destination, () => { void refreshWeather() })
+watch(() => props.travelPreferences, () => { void redraw() }, { deep: true })
 watch(() => props.recommendationsOpen, () => fitDayRoute())
 watch(() => [store.plan, store.activeDayId, allPlaces().map(place => `${place.id}:${place.name}:${place.city}`).join('|')] as const, async () => {
   if (mapReady.value) await geocodePendingPlaces()
@@ -358,7 +449,7 @@ onMounted(() => {
     resizeObserver.observe(mapElement.value)
   }
 })
-onBeforeUnmount(() => { clearTimeout(searchTimer); resizeObserver?.disconnect(); map?.destroy() })
+onBeforeUnmount(() => { disposed = true; weatherVersion++; renderVersion++; clearTimeout(searchTimer); resizeObserver?.disconnect(); map?.destroy() })
 </script>
 
 <template>

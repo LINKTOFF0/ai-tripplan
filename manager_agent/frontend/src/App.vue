@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { ArrowLeft, Bike, Bus, Car, Check, ChevronDown, ChevronLeft, ChevronRight, CloudSun, Compass, DraftingCompass, FerrisWheel, Footprints, Hotel, Landmark, ListChecks, Map, MapPin, MoreHorizontal, NotebookPen, PanelLeftOpen, PanelRightClose, Pencil, Plus, RefreshCw, Route, Share2, SlidersHorizontal, Sparkles, Star, Store, Trees, Utensils, X, Trash2 } from 'lucide-vue-next'
 import AssistantPanel from '@/components/AssistantPanel.vue'
 import DayDatePicker from '@/components/DayDatePicker.vue'
@@ -8,6 +8,7 @@ import { recommendations } from '@/data/sampleJourney'
 import { useJourneyStore } from '@/stores/journey'
 import { usePersonalToolsStore } from '@/stores/personalTools'
 import type { JourneyPlace, Recommendation } from '@/types/journey'
+import { preferredMode, routeKey, summarizeRoutes, type TravelDefaults, type TravelMode, type TravelRoute } from '@/utils/travelRoutes'
 
 const store = useJourneyStore()
 watch(() => store.plan.title, title => { document.title = `圆规 AI · ${title || '旅行规划'}` }, { immediate: true })
@@ -33,7 +34,8 @@ const placeAdviceInput = ref<HTMLTextAreaElement>()
 const placeMenuId = ref('')
 const draggedPlaceId = ref('')
 const activeTravelLegIndex = ref<number | null>(null)
-type TravelMode = 'walking' | 'cycling' | 'driving' | 'transit'
+const travelRoutes = ref<Record<string, TravelRoute>>({})
+const liveWeather = ref<{ status: string; temperature?: string; weather?: string; city?: string; reportTime?: string }>({ status: 'loading' })
 const travelModes: { id: TravelMode; label: string; icon: typeof Footprints }[] = [
   { id: 'walking', label: '步行', icon: Footprints },
   { id: 'cycling', label: '骑行', icon: Bike },
@@ -41,11 +43,40 @@ const travelModes: { id: TravelMode; label: string; icon: typeof Footprints }[] 
   { id: 'transit', label: '公共交通', icon: Bus },
 ]
 const travelPreferences = ref<Record<string, TravelMode>>(loadTravelPreferences())
+const travelDefaults = ref<TravelDefaults>(loadTravelDefaults())
+const preferenceDialog = ref(false)
+const preferenceDraft = ref<TravelDefaults>({ ...travelDefaults.value })
+const applyToExisting = ref(false)
+const preferenceDialogElement = ref<HTMLElement>()
+let preferenceReturnFocus: HTMLElement | null = null
+watch(preferenceDialog, async open => {
+  if (open) { preferenceReturnFocus = document.activeElement as HTMLElement; await nextTick(); preferenceDialogElement.value?.querySelector<HTMLButtonElement>('button')?.focus() }
+  else preferenceReturnFocus?.focus()
+})
+watch(() => [store.activeDayId, store.places.map(place => place.id).join('|')], () => { activeTravelLegIndex.value = null })
+function trapPreferenceFocus(event: KeyboardEvent) {
+  if (event.key !== 'Tab') return
+  const controls = preferenceDialogElement.value?.querySelectorAll<HTMLElement>('button, input')
+  if (!controls?.length) return
+  const first = controls[0]!
+  const last = controls[controls.length - 1]!
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+}
+const effectiveTravelPreferences = computed(() => {
+  const result: Record<string, TravelMode> = {}
+  for (const day of store.plan.days) day.places.slice(0, -1).forEach((from, index) => {
+    const to = day.places[index + 1]
+    const key = `${from.id}:${to.id}`
+    result[key] = travelPreferences.value[key] ?? preferredMode(from, to, travelDefaults.value)
+  })
+  return result
+})
 const assistantCollapsed = ref(false)
 const itineraryCollapsed = ref(false)
 const showMapRecommendations = ref(false)
 const mapDayMenuOpen = ref(false)
-const journeyMap = ref<{ recenter: () => Promise<boolean>; focusPlace: (placeId: string) => Promise<boolean>; focusRecommendation: (placeId: string) => boolean; refreshRecommendations: () => void; prepareRouteOptimization: () => Promise<boolean> } | null>(null)
+const journeyMap = ref<{ recenter: () => Promise<boolean>; focusPlace: (placeId: string) => Promise<boolean>; focusRecommendation: (placeId: string) => boolean; refreshRecommendations: () => void; prepareRouteOptimization: () => Promise<boolean>; requestAlternatives: (fromId: string, toId: string) => Promise<void> } | null>(null)
 const workspaceElement = ref<HTMLElement>()
 const initialPanelWidths = loadPanelWidths()
 const assistantWidth = ref(initialPanelWidths.assistant)
@@ -54,7 +85,41 @@ const resizeState = ref<{ panel: 'assistant' | 'itinerary'; startX: number; star
 let toastTimeout: ReturnType<typeof setTimeout> | undefined
 const filteredRecommendations = computed(() => recommendationFilter.value ? mapRecommendations.value.filter(item => item.kind === recommendationFilter.value) : [])
 const totalPlaceCount = computed(() => store.plan.days.reduce((total, day) => total + day.places.length, 0))
-const routeDistance = computed(() => `${(totalPlaceCount.value * 1.8).toFixed(1)} km`)
+const routeDistance = computed(() => summarizeRoutes(store.plan.days, effectiveTravelPreferences.value, travelRoutes.value))
+
+function loadTravelDefaults(): TravelDefaults {
+  try {
+    const value = JSON.parse(localStorage.getItem('aitripplan.travel-defaults.v1') ?? '{}')
+    const valid = (mode: unknown): mode is TravelMode => ['walking', 'cycling', 'driving', 'transit'].includes(String(mode))
+    return { short: valid(value?.short) ? value.short : 'walking', long: valid(value?.long) ? value.long : 'driving' }
+  } catch { return { short: 'walking', long: 'driving' } }
+}
+function openTravelPreferences() {
+  preferenceDraft.value = { ...travelDefaults.value }
+  applyToExisting.value = false
+  preferenceDialog.value = true
+}
+function saveTravelDefaults() {
+  travelDefaults.value = { ...preferenceDraft.value }
+  if (applyToExisting.value) {
+    const overrides = { ...travelPreferences.value }
+    Object.keys(effectiveTravelPreferences.value).forEach(key => { delete overrides[key] })
+    travelPreferences.value = overrides
+  }
+  try {
+    localStorage.setItem('aitripplan.travel-defaults.v1', JSON.stringify(travelDefaults.value))
+    localStorage.setItem('aitripplan.travel-modes.v1', JSON.stringify(travelPreferences.value))
+  } catch { notify('偏好已应用，浏览器未能保存设置') }
+  preferenceDialog.value = false
+}
+function toggleTravelMenu(index: number) {
+  activeTravelLegIndex.value = activeTravelLegIndex.value === index ? null : index
+  if (activeTravelLegIndex.value !== null) {
+    const from = store.places[index]
+    const to = store.places[index + 1]
+    if (from && to) void journeyMap.value?.requestAlternatives(from.id, to.id)
+  }
+}
 
 function notify(message: string) {
   toast.value = message
@@ -181,28 +246,24 @@ function reorderPlace(event: DragEvent, targetId: string) {
 }
 function stopPlaceReorder() { draggedPlaceId.value = '' }
 function travelModeFor(from: JourneyPlace, to: JourneyPlace): TravelMode {
-  return travelPreferences.value[`${from.id}:${to.id}`] ?? 'walking'
+  return effectiveTravelPreferences.value[`${from.id}:${to.id}`] ?? preferredMode(from, to, travelDefaults.value)
 }
 function selectTravelMode(from: JourneyPlace, to: JourneyPlace, mode: TravelMode) {
   travelPreferences.value[`${from.id}:${to.id}`] = mode
   activeTravelLegIndex.value = null
   try { localStorage.setItem('aitripplan.travel-modes.v1', JSON.stringify(travelPreferences.value)) } catch { /* Preferences remain active for this session. */ }
 }
-function estimateLeg(from: JourneyPlace, to: JourneyPlace, mode: TravelMode) {
+function routeLeg(from: JourneyPlace, to: JourneyPlace, mode: TravelMode) {
   if (from.locationStatus !== 'matched' || to.locationStatus !== 'matched') return null
-  const toRadians = (degrees: number) => degrees * Math.PI / 180
-  const latitudeDelta = toRadians(to.latitude - from.latitude)
-  const longitudeDelta = toRadians(to.longitude - from.longitude)
-  const latitudeFrom = toRadians(from.latitude)
-  const latitudeTo = toRadians(to.latitude)
-  const a = Math.sin(latitudeDelta / 2) ** 2 + Math.cos(latitudeFrom) * Math.cos(latitudeTo) * Math.sin(longitudeDelta / 2) ** 2
-  const straightLineKm = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-  const routeFactors: Record<TravelMode, number> = { walking: 1.2, cycling: 1.18, driving: 1.32, transit: 1.25 }
-  const speeds: Record<TravelMode, number> = { walking: 4.5, cycling: 14, driving: 25, transit: 19 }
-  const routeKm = straightLineKm * routeFactors[mode]
-  const meters = Math.max(10, Math.round(routeKm * 100)) * 10
-  const minutes = Math.max(1, Math.round(routeKm / speeds[mode] * 60) + (mode === 'transit' ? 5 : mode === 'driving' ? 2 : 0))
-  return { distance: meters < 1000 ? `${meters} 米` : `${(meters / 1000).toFixed(1)} 公里`, duration: `${minutes} 分钟` }
+  const route = travelRoutes.value[routeKey(from, to, mode)]
+  return route?.status === 'ready' ? route : null
+}
+function routeStatus(from: JourneyPlace, to: JourneyPlace, mode: TravelMode) {
+  if (from.locationStatus !== 'matched' || to.locationStatus !== 'matched') return '位置待确认'
+  const route = travelRoutes.value[routeKey(from, to, mode)]
+  if (route?.status === 'unavailable' && route.reason === 'no_data') return '暂无可用方案'
+  if (route?.status === 'unavailable' && route.reason === 'rate_limit') return '查询限流，请稍后重试'
+  return route?.status === 'loading' ? '查询中' : route?.status === 'ready' ? '高德路线' : route?.status === 'unavailable' ? '路线不可用' : '等待查询'
 }
 function deleteCurrentDay() {
   const day = store.currentDay
@@ -323,7 +384,7 @@ function focusRecommendation(placeId: string) { void journeyMap.value?.focusReco
 
           <section v-else-if="activeTab === 'overview'" class="overview-panel">
             <div class="overview-main"><div class="section-kicker"><Sparkles :size="13" /> 行程总览</div><h1>{{ store.plan.title }}</h1><div class="overview-facts"><span><MapPin :size="14" /> {{ store.plan.destination }}</span><span><Route :size="14" /> {{ store.plan.days.length }} 天 · {{ totalPlaceCount }} 个地点</span><span><Compass :size="14" /> {{ routeDistance }}</span></div></div>
-            <div class="weather-block"><CloudSun :size="25" /><strong>28°</strong><span>晴间多云</span></div>
+            <div class="weather-block" :title="liveWeather.status === 'ready' ? `${liveWeather.city} · 发布于 ${liveWeather.reportTime}（实时天气，非旅行日期预报）` : ''"><CloudSun :size="25" /><strong>{{ liveWeather.status === 'ready' ? `${liveWeather.temperature}°` : '—' }}</strong><span>{{ liveWeather.status === 'ready' ? `${liveWeather.weather} · 实时` : liveWeather.status === 'loading' ? '天气查询中' : '天气不可用' }}</span></div>
           </section>
 
           <section v-if="activeTab === 'overview' && !activeTool" class="overview-days" aria-label="每日行程">
@@ -349,7 +410,7 @@ function focusRecommendation(placeId: string) { void journeyMap.value?.focusReco
                   <small v-if="place.locationStatus !== 'matched'">待确认定位 · 未加入路线</small>
                   <section v-if="store.selectedPlaceId === place.id" class="place-advice" @click.stop><div><Sparkles :size="13" /><strong>游玩建议</strong></div><textarea v-if="editingPlaceAdviceId === place.id" ref="placeAdviceInput" v-model="placeAdviceDraft" maxlength="1000" aria-label="编辑游玩建议" placeholder="添加游玩建议" @keydown.esc.prevent="savePlaceAdvice(place.id)" @blur="savePlaceAdvice(place.id)"></textarea><button v-else class="place-advice-content" @click="editPlaceAdvice(place.id)"><p>{{ placeAdvice(place) || '点击添加游玩建议' }}</p></button><span v-if="place.address"><MapPin :size="12" /> {{ place.address }}</span></section>
                 </article>
-                <div v-if="index < store.places.length - 1" class="travel-leg"><Route :size="13" /><div class="travel-preference-wrap"><button class="travel-preference-button" :aria-expanded="activeTravelLegIndex === index" @click.stop="activeTravelLegIndex = activeTravelLegIndex === index ? null : index"><component :is="travelModes.find(mode => mode.id === travelModeFor(place, store.places[index + 1]))?.icon" :size="14" /><span>{{ travelModes.find(mode => mode.id === travelModeFor(place, store.places[index + 1]))?.label }}</span><span v-if="estimateLeg(place, store.places[index + 1], travelModeFor(place, store.places[index + 1]))">约 {{ estimateLeg(place, store.places[index + 1], travelModeFor(place, store.places[index + 1]))?.distance }} · {{ estimateLeg(place, store.places[index + 1], travelModeFor(place, store.places[index + 1]))?.duration }}</span><span v-else>位置待确认</span><ChevronDown :size="12" /></button><small>路线估算</small><div v-if="activeTravelLegIndex === index" class="travel-mode-menu"><header><strong>选择交通方式</strong><span><SlidersHorizontal :size="12" /> 偏好</span></header><button v-for="mode in travelModes" :key="mode.id" :class="{ active: travelModeFor(place, store.places[index + 1]) === mode.id }" @click.stop="selectTravelMode(place, store.places[index + 1], mode.id)"><component :is="mode.icon" :size="17" /><span>{{ mode.label }}</span><span v-if="estimateLeg(place, store.places[index + 1], mode.id)">{{ estimateLeg(place, store.places[index + 1], mode.id)?.distance }} <i>|</i> {{ estimateLeg(place, store.places[index + 1], mode.id)?.duration }}</span><span v-else>位置待确认</span><Check v-if="travelModeFor(place, store.places[index + 1]) === mode.id" :size="15" /></button></div></div></div>
+                <div v-if="index < store.places.length - 1" class="travel-leg"><Route :size="13" /><div class="travel-preference-wrap"><button class="travel-preference-button" :aria-expanded="activeTravelLegIndex === index" @click.stop="toggleTravelMenu(index)"><component :is="travelModes.find(mode => mode.id === travelModeFor(place, store.places[index + 1]))?.icon" :size="14" /><span>{{ travelModes.find(mode => mode.id === travelModeFor(place, store.places[index + 1]))?.label }}</span><span v-if="routeLeg(place, store.places[index + 1], travelModeFor(place, store.places[index + 1]))">约 {{ routeLeg(place, store.places[index + 1], travelModeFor(place, store.places[index + 1]))?.distance }} · {{ routeLeg(place, store.places[index + 1], travelModeFor(place, store.places[index + 1]))?.duration }}</span><span v-else>{{ routeStatus(place, store.places[index + 1], travelModeFor(place, store.places[index + 1])) }}</span><ChevronDown :size="12" /></button><small>{{ routeStatus(place, store.places[index + 1], travelModeFor(place, store.places[index + 1])) }}</small><div v-if="activeTravelLegIndex === index" class="travel-mode-menu"><header><strong>选择交通方式</strong><button class="travel-settings-trigger" @click.stop="openTravelPreferences"><SlidersHorizontal :size="12" /> 偏好</button></header><button v-for="mode in travelModes" :key="mode.id" :class="{ active: travelModeFor(place, store.places[index + 1]) === mode.id }" @click.stop="selectTravelMode(place, store.places[index + 1], mode.id)"><component :is="mode.icon" :size="17" /><span>{{ mode.label }}</span><span v-if="routeLeg(place, store.places[index + 1], mode.id)">{{ routeLeg(place, store.places[index + 1], mode.id)?.distance }} <i>|</i> {{ routeLeg(place, store.places[index + 1], mode.id)?.duration }}</span><span v-else>{{ routeStatus(place, store.places[index + 1], mode.id) }}</span><Check v-if="travelModeFor(place, store.places[index + 1]) === mode.id" :size="15" /></button></div></div></div>
               </template>
             </div>
             <div v-else class="empty-day"><MapPin :size="25" /><strong>这一天还没有地点</strong><span>从右侧推荐中添加地点，开始安排路线。</span></div>
@@ -361,10 +422,22 @@ function focusRecommendation(placeId: string) { void journeyMap.value?.focusReco
 
       <aside class="map-column" :class="{ 'mobile-active': mobilePanel === 'map' }">
         <button v-if="itineraryCollapsed" class="itinerary-expand-rail" aria-label="展开行程详情" @click="itineraryCollapsed = false; showMapRecommendations = false"><PanelLeftOpen :size="16" /><span>行程详情</span></button>
-        <section class="map-wrap"><JourneyMap ref="journeyMap" :category="recommendationFilter" :recommendations-open="itineraryCollapsed && showMapRecommendations" @toast="notify" @recommendations="mapRecommendations = $event" /><div class="map-overlay-top"><div class="map-day-picker"><button class="map-location-chip" :aria-expanded="mapDayMenuOpen" aria-haspopup="listbox" @click="mapDayMenuOpen = !mapDayMenuOpen"><span>DAY {{ store.currentDay?.dayNumber ?? 1 }}</span><strong>{{ store.plan.destination }}</strong><ChevronDown :size="14" /></button><div v-if="mapDayMenuOpen" class="map-day-menu" role="listbox" aria-label="选择地图行程日期"><button v-for="day in store.plan.days" :key="day.id" role="option" :aria-selected="store.activeDayId === day.id" :class="{ active: store.activeDayId === day.id }" @click="selectMapDay(day.id)"><span class="map-day-option-number">DAY {{ day.dayNumber }}</span><span class="map-day-option-copy"><strong>{{ day.title || '自由安排' }}</strong><small>{{ day.date || '日期待定' }} · {{ day.places.length }} 个地点</small></span><Check v-if="store.activeDayId === day.id" :size="15" /></button></div></div><div class="map-toolbar-actions"><button v-if="itineraryCollapsed" class="map-recommend-toggle" :class="{ active: showMapRecommendations }" @click="toggleMapRecommendations"><Sparkles :size="14" /><span>推荐</span><ChevronDown :size="13" /></button><button class="map-icon-button" aria-label="重新定位到当天路线" title="重新定位到当天路线" @click="recenterMap"><Compass :size="17" /></button></div></div></section>
+        <section class="map-wrap"><JourneyMap ref="journeyMap" :category="recommendationFilter" :travel-preferences="effectiveTravelPreferences" @routes="travelRoutes = $event" @weather="liveWeather = $event" :recommendations-open="itineraryCollapsed && showMapRecommendations" @toast="notify" @recommendations="mapRecommendations = $event" /><div class="map-overlay-top"><div class="map-day-picker"><button class="map-location-chip" :aria-expanded="mapDayMenuOpen" aria-haspopup="listbox" @click="mapDayMenuOpen = !mapDayMenuOpen"><span>DAY {{ store.currentDay?.dayNumber ?? 1 }}</span><strong>{{ store.plan.destination }}</strong><ChevronDown :size="14" /></button><div v-if="mapDayMenuOpen" class="map-day-menu" role="listbox" aria-label="选择地图行程日期"><button v-for="day in store.plan.days" :key="day.id" role="option" :aria-selected="store.activeDayId === day.id" :class="{ active: store.activeDayId === day.id }" @click="selectMapDay(day.id)"><span class="map-day-option-number">DAY {{ day.dayNumber }}</span><span class="map-day-option-copy"><strong>{{ day.title || '自由安排' }}</strong><small>{{ day.date || '日期待定' }} · {{ day.places.length }} 个地点</small></span><Check v-if="store.activeDayId === day.id" :size="15" /></button></div></div><div class="map-toolbar-actions"><button v-if="itineraryCollapsed" class="map-recommend-toggle" :class="{ active: showMapRecommendations }" @click="toggleMapRecommendations"><Sparkles :size="14" /><span>推荐</span><ChevronDown :size="13" /></button><button class="map-icon-button" aria-label="重新定位到当天路线" title="重新定位到当天路线" @click="recenterMap"><Compass :size="17" /></button></div></div></section>
         <section class="recommend-section" :class="{ 'map-recommendations-open': showMapRecommendations }"><header class="recommend-heading"><div><div class="section-kicker"><Sparkles :size="13" /> 当前地图范围内的地点</div><h2>推荐</h2></div><button class="icon-button" aria-label="刷新推荐" title="重新搜索当前地图范围" @click="journeyMap?.refreshRecommendations()"><RefreshCw :size="16" /></button></header><div class="recommend-filters"><button v-for="filter in [{id:'attraction',label:'游玩'},{id:'food',label:'美食'},{id:'hotel',label:'住宿'}] as const" :key="filter.id" :class="{ active: recommendationFilter === filter.id }" @click="recommendationFilter = filter.id"><i :class="`filter-swatch swatch-${filter.id}`"></i>{{ filter.label }}</button></div><div class="recommendation-list"><article v-for="item in filteredRecommendations" :key="item.id" class="recommendation-row" tabindex="0" @click="focusRecommendation(item.id)" @keydown.enter="focusRecommendation(item.id)"><div class="recommendation-art" :class="`art-${item.kind}`"><component :is="locationIcon(item.icon)" :size="21" /></div><div class="recommendation-copy"><h3>{{ item.name }}</h3><p>{{ item.address || '地址暂无' }}</p><div class="recommend-meta"><span class="recommend-category">{{ item.kind === 'attraction' ? '游玩' : item.kind === 'food' ? '美食' : '住宿' }}</span><span>{{ item.distance }}</span><span v-if="item.rating"><Star :size="11" fill="currentColor" /> {{ item.rating }}</span></div></div><button class="recommend-add" :aria-label="`添加${item.name}`" @click.stop="addRecommendation(item)"><Plus :size="17" /></button></article><p v-if="!recommendationFilter" class="recommend-empty">选择游玩、美食或住宿查看地点</p><p v-else-if="!filteredRecommendations.length" class="recommend-empty">当前地图范围没有匹配地点</p></div><button class="more-recommendations" @click="journeyMap?.refreshRecommendations()">搜索当前地图范围 <RefreshCw :size="12" /></button></section>
       </aside>
     </main>
+    <Teleport to="body">
+      <div v-if="preferenceDialog" class="travel-settings-overlay" @click.self="preferenceDialog = false" @keydown.esc="preferenceDialog = false">
+        <section ref="preferenceDialogElement" class="travel-settings" role="dialog" aria-modal="true" aria-labelledby="travel-settings-title" tabindex="-1" @keydown="trapPreferenceFocus">
+          <header><h2 id="travel-settings-title">交通偏好</h2><button autofocus class="icon-button" aria-label="关闭交通偏好" @click="preferenceDialog = false"><X :size="22" /></button></header>
+          <fieldset v-for="group in [{ key: 'long', label: '直线距离大于 1 公里' }, { key: 'short', label: '直线距离不超过 1 公里' }] as const" :key="group.key">
+            <legend>{{ group.label }}</legend><div class="travel-settings-modes" role="radiogroup" :aria-label="group.label"><button v-for="mode in travelModes" :key="mode.id" role="radio" :aria-checked="preferenceDraft[group.key] === mode.id" :class="{ active: preferenceDraft[group.key] === mode.id }" @click="preferenceDraft[group.key] = mode.id"><component :is="mode.icon" :size="25" /><span>{{ mode.label }}</span></button></div>
+          </fieldset>
+          <label class="travel-settings-apply"><input v-model="applyToExisting" type="checkbox">同时应用到现有路段</label>
+          <footer><button @click="saveTravelDefaults"><Check :size="16" /> 保存</button></footer>
+        </section>
+      </div>
+    </Teleport>
     <Transition name="toast"><div v-if="toast" class="toast-message"><Check :size="15" /> {{ toast }}</div></Transition>
   </div>
 </template>

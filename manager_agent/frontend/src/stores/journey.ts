@@ -89,5 +89,12 @@ export const useJourneyStore = defineStore('journey', () => {
     selectedPlaceId.value = next.days[0]?.places[0]?.id ?? ''
   }
 
-  return { plan, activeDayId, currentDay, places, selectedPlaceId, selectedPlace, selectPlace, addPlace, removePlace, movePlace, reorderPlaces, addDay, removeDay, replacePlan }
+  function applyPlanEdit(next: JourneyPlan) {
+    if (next.id !== plan.value.id) throw new Error('编辑结果与当前行程不一致')
+    plan.value = next
+    if (!next.days.some(day => day.id === activeDayId.value)) activeDayId.value = next.days[0]?.id ?? ''
+    if (!currentDay.value?.places.some(place => place.id === selectedPlaceId.value)) selectedPlaceId.value = ''
+  }
+
+  return { plan, activeDayId, currentDay, places, selectedPlaceId, selectedPlace, selectPlace, addPlace, removePlace, movePlace, reorderPlaces, addDay, removeDay, replacePlan, applyPlanEdit }
 })
