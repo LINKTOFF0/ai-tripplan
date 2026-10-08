@@ -1,6 +1,7 @@
 package utils;
 
 import io.agentscope.core.tool.Toolkit;
+import io.agentscope.core.tool.ToolkitConfig;
 import io.agentscope.core.tool.mcp.McpClientWrapper;
 
 public class ToolUtils {
@@ -8,7 +9,7 @@ public class ToolUtils {
 
     public ToolUtils() {
         //创建工具包
-        toolkit = new Toolkit();
+        toolkit = new Toolkit(ToolkitConfig.builder().parallel(false).build());
     }
 
     //获取工具包

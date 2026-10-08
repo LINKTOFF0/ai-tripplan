@@ -4,6 +4,7 @@ import data.PromptSchema;
 import data.ResponseSchema;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import managerAgent.agents.ManagerAgent;
 import managerAgent.util.PlanExporter;
 import org.springframework.http.MediaType;
@@ -17,11 +18,55 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse.BodyHandlers;
+import java.nio.charset.StandardCharsets;
+import org.springframework.beans.factory.annotation.Value;
 
 @RestController
 public class ManagerAgentController {
     @Resource
     private ManagerAgent managerAgent;
+
+    @Value("${AMAP_SECURITY_JS_CODE:}")
+    private String amapSecurityCode;
+
+    private final HttpClient amapHttpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
+
+    @RequestMapping(value = {"/_AMapService/**", "/_AMapService"}, method = RequestMethod.GET)
+    public void amapServiceProxy(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        if (amapSecurityCode == null || amapSecurityCode.isBlank()) {
+            response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE, "AMap service proxy is not configured");
+            return;
+        }
+        String prefix = request.getContextPath() + "/_AMapService";
+        String path = request.getRequestURI().substring(prefix.length());
+        if (path.isBlank()) path = "/";
+        if (!path.matches("/[A-Za-z0-9_./-]*") || path.contains("..")) {
+            response.sendError(HttpServletResponse.SC_BAD_REQUEST);
+            return;
+        }
+        boolean styleRequest = path.startsWith("/v4/map/styles");
+        String host = styleRequest ? "https://webapi.amap.com" : "https://restapi.amap.com";
+        String query = request.getQueryString();
+        String jscode = "jscode=" + URLEncoder.encode(amapSecurityCode, StandardCharsets.UTF_8);
+        URI uri = URI.create(host + path + (query == null || query.isBlank() ? "?" : "?" + query + "&") + jscode);
+        try {
+            HttpRequest upstream = HttpRequest.newBuilder(uri).GET().build();
+            var result = amapHttpClient.send(upstream, BodyHandlers.ofByteArray());
+            response.setStatus(result.statusCode());
+            response.setContentType(result.headers().firstValue("content-type").orElse("application/json;charset=UTF-8"));
+            response.getOutputStream().write(result.body());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            response.sendError(HttpServletResponse.SC_BAD_GATEWAY);
+        } catch (Exception e) {
+            response.sendError(HttpServletResponse.SC_BAD_GATEWAY);
+        }
+    }
 
     @RequestMapping(
             value = "/trip",

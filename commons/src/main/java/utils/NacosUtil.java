@@ -15,10 +15,15 @@ public class NacosUtil {
 
         // 设置 Nacos 地址
         Properties properties = new Properties();
-        properties.put(PropertyKeyConst.SERVER_ADDR, "localhost:8848");
+        properties.put(PropertyKeyConst.SERVER_ADDR, getServerAddress());
         // 创建 Nacos Client
         return AiFactory.createAiService(properties);
+    }
 
+    private static String getServerAddress() {
+        String address = System.getenv("NACOS_SERVER_ADDR");
+        if (address == null || address.isBlank()) address = System.getProperty("NACOS_SERVER_ADDR");
+        return address == null || address.isBlank() ? "localhost:8848" : address.trim();
     }
 }
 

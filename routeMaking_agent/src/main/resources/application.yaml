@@ -7,7 +7,7 @@ spring:
 
 # MCP 配置
 mcp:
-  amap_addr: ${AMAP_MAP_ADDR}
+  amap_addr: ${AMAP_MAP_ADDR:https://mcp.api-inference.modelscope.net/0fceecf47ed541/sse}
 
 # A2A协议服务端
 agentscope:
@@ -15,4 +15,4 @@ agentscope:
     server:
       enabled: true
     nacos:
-      server-addr: localhost:8848
+      server-addr: ${NACOS_SERVER_ADDR:localhost:8848}

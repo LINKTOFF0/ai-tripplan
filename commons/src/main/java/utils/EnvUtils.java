@@ -1,6 +1,8 @@
 package utils;
 
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Properties;
 
 /**
@@ -23,11 +25,10 @@ public class EnvUtils {
             if (loaded) {
                 return;
             }
-            try (InputStream is = EnvUtils.class
-                    .getClassLoader().getResourceAsStream(".env")) {
+            try (InputStream is = openEnv()) {
                 if (is == null) {
-                    System.out.println("[WARN] 未找到 .env 文件，请确保 classpath 下有 .env 文件，"
-                            + "或设置环境变量 DASHSCOPE_API_KEY");
+                    System.out.println("[WARN] 未找到 .env 文件，请设置所需环境变量");
+                    loaded = true;
                     return;
                 }
                 Properties props = new Properties();
@@ -38,7 +39,9 @@ public class EnvUtils {
                             || (v.startsWith("\"") && v.endsWith("\""))) {
                         v = v.substring(1, v.length() - 1);
                     }
-                    System.setProperty(key.toString(), v);
+                    if (System.getenv(key.toString()) == null) {
+                        System.setProperty(key.toString(), v);
+                    }
                 });
                 System.out.println("[INFO] 已从 .env 文件加载 " + props.size() + " 个配置项");
             } catch (Exception e) {
@@ -46,5 +49,15 @@ public class EnvUtils {
             }
             loaded = true;
         }
+    }
+
+    private static InputStream openEnv() throws java.io.IOException {
+        Path directory = Path.of("").toAbsolutePath();
+        while (directory != null) {
+            Path candidate = directory.resolve(".env");
+            if (Files.isRegularFile(candidate)) return Files.newInputStream(candidate);
+            directory = directory.getParent();
+        }
+        return EnvUtils.class.getClassLoader().getResourceAsStream(".env");
     }
 }

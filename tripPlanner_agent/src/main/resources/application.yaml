@@ -11,11 +11,7 @@ agentscope:
     server:
       enabled: true
     nacos:
-      server-addr: localhost:8848
-
-agent:
-  model_name: ${MODEL_NAME}
-  alibaba_dashscope_key: ${ALIBABA_DASH_SCOPE_KEY}
+      server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
 
 mcp:
-  amap_addr: ${AMAP_MAP_ADDR}
+  amap_addr: ${AMAP_MAP_ADDR:https://mcp.api-inference.modelscope.net/0fceecf47ed541/sse}
