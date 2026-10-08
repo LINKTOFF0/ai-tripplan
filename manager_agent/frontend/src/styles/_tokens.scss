@@ -18,7 +18,7 @@
 }
 
 * { box-sizing: border-box; }
-body { min-width: 320px; min-height: 100vh; margin: 0; }
+body { min-width: 960px; min-height: 100vh; margin: 0; }
 button, textarea { font: inherit; }
 button { color: inherit; }
 button:focus-visible, textarea:focus-visible { outline: 2px solid var(--sea); outline-offset: 2px; }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { ArrowLeft, Bike, Bus, Car, Check, ChevronDown, ChevronLeft, ChevronRight, CloudSun, Compass, DraftingCompass, FerrisWheel, Footprints, Hotel, Landmark, ListChecks, Map, MapPin, MoreHorizontal, NotebookPen, PanelLeftOpen, PanelRightClose, Pencil, Plus, RefreshCw, Route, Share2, SlidersHorizontal, Sparkles, Star, Store, Trees, Utensils, X, Trash2 } from 'lucide-vue-next'
+import { ArrowLeft, Bike, Bus, Car, Check, ChevronDown, ChevronLeft, ChevronRight, CloudSun, Compass, DraftingCompass, FerrisWheel, Footprints, Hotel, Landmark, ListChecks, MapPin, MoreHorizontal, NotebookPen, PanelLeftOpen, PanelRightClose, Pencil, Plus, RefreshCw, Route, Share2, SlidersHorizontal, Sparkles, Star, Store, Trees, Utensils, X, Trash2 } from 'lucide-vue-next'
 import AssistantPanel from '@/components/AssistantPanel.vue'
 import DayDatePicker from '@/components/DayDatePicker.vue'
 import JourneyMap from '@/components/JourneyMap.vue'
@@ -12,7 +12,6 @@ import { preferredMode, routeKey, summarizeRoutes, type TravelDefaults, type Tra
 
 const store = useJourneyStore()
 watch(() => store.plan.title, title => { document.title = `圆规 AI · ${title || '旅行规划'}` }, { immediate: true })
-const mobilePanel = ref<'assistant' | 'itinerary' | 'map'>('assistant')
 const activeTab = ref<'overview' | 'day'>('overview')
 const activeTool = ref<'note' | 'checklist' | null>(null)
 const personalTools = usePersonalToolsStore()
@@ -156,13 +155,13 @@ function resizePanels(event: PointerEvent) {
   const state = resizeState.value
   if (!state) return
   const delta = (event.clientX - state.startX) / state.workspaceWidth * 100
-  const minimumMap = 320 / state.workspaceWidth * 100
+  const minimumMap = 280 / state.workspaceWidth * 100
   if (state.panel === 'assistant') {
-    const minimum = 275 / state.workspaceWidth * 100
+    const minimum = 220 / state.workspaceWidth * 100
     const maximum = Math.min(38, 100 - itineraryWidth.value - minimumMap - 2 / state.workspaceWidth * 100)
     assistantWidth.value = Math.min(maximum, Math.max(minimum, state.startWidth + delta))
   } else {
-    const minimum = 420 / state.workspaceWidth * 100
+    const minimum = 340 / state.workspaceWidth * 100
     const assistant = assistantCollapsed.value ? 0 : assistantWidth.value
     const maximum = 100 - assistant - minimumMap - 2 / state.workspaceWidth * 100
     itineraryWidth.value = Math.min(maximum, Math.max(minimum, state.startWidth + delta))
@@ -358,17 +357,12 @@ function focusRecommendation(placeId: string) { void journeyMap.value?.focusReco
       <div class="topbar-right"><span class="save-indicator"><Check :size="14" /> 已保存</span><span class="day-count">{{ store.plan.days.length }} 天</span><button class="icon-button" aria-label="分享行程" @click="sharePlan"><Share2 :size="18" /></button><button class="icon-button" aria-label="更多选项" @click="notify('更多行程操作将在后续版本开放')"><MoreHorizontal :size="20" /></button></div>
     </header>
 
-    <nav class="mobile-tabs" aria-label="切换工作区">
-      <button :class="{ active: mobilePanel === 'assistant' }" @click="mobilePanel = 'assistant'"><Sparkles :size="16" /> AI 助手</button>
-      <button :class="{ active: mobilePanel === 'itinerary' }" @click="mobilePanel = 'itinerary'"><Route :size="16" /> 行程</button>
-      <button :class="{ active: mobilePanel === 'map' }" @click="mobilePanel = 'map'"><Map :size="16" /> 地图</button>
-    </nav>
 
     <main ref="workspaceElement" class="workspace" :style="{ '--assistant-width': assistantWidth, '--itinerary-width': itineraryWidth }">
-      <AssistantPanel class="assistant-column" :class="{ 'mobile-active': mobilePanel === 'assistant' }" :collapsed="assistantCollapsed" @toggle-collapse="assistantCollapsed = !assistantCollapsed" @toast="notify" />
+      <AssistantPanel class="assistant-column" :collapsed="assistantCollapsed" @toggle-collapse="assistantCollapsed = !assistantCollapsed" @toast="notify" />
       <div v-if="!assistantCollapsed" class="panel-resizer" :style="{ left: `${assistantWidth}%` }" role="separator" aria-orientation="vertical" aria-label="调整 AI 对话栏宽度" @pointerdown="startPanelResize($event, 'assistant')" @pointermove="resizePanels" @pointerup="stopPanelResize" @pointercancel="stopPanelResize"></div>
 
-      <section class="itinerary-column" :class="{ 'mobile-active': mobilePanel === 'itinerary' }">
+      <section class="itinerary-column">
         <div class="itinerary-toolbar">
           <div class="tabs" role="tablist">
             <button :class="{ active: activeTab === 'overview' && !activeTool }" @click="activeTab = 'overview'; activeTool = null">总览</button>
@@ -420,7 +414,7 @@ function focusRecommendation(placeId: string) { void journeyMap.value?.focusReco
       </section>
       <div v-if="!itineraryCollapsed" class="panel-resizer" :style="{ left: `${(assistantCollapsed ? 0 : assistantWidth) + itineraryWidth}%` }" role="separator" aria-orientation="vertical" aria-label="调整行程栏宽度" @pointerdown="startPanelResize($event, 'itinerary')" @pointermove="resizePanels" @pointerup="stopPanelResize" @pointercancel="stopPanelResize"></div>
 
-      <aside class="map-column" :class="{ 'mobile-active': mobilePanel === 'map' }">
+      <aside class="map-column">
         <button v-if="itineraryCollapsed" class="itinerary-expand-rail" aria-label="展开行程详情" @click="itineraryCollapsed = false; showMapRecommendations = false"><PanelLeftOpen :size="16" /><span>行程详情</span></button>
         <section class="map-wrap"><JourneyMap ref="journeyMap" :category="recommendationFilter" :travel-preferences="effectiveTravelPreferences" @routes="travelRoutes = $event" @weather="liveWeather = $event" :recommendations-open="itineraryCollapsed && showMapRecommendations" @toast="notify" @recommendations="mapRecommendations = $event" /><div class="map-overlay-top"><div class="map-day-picker"><button class="map-location-chip" :aria-expanded="mapDayMenuOpen" aria-haspopup="listbox" @click="mapDayMenuOpen = !mapDayMenuOpen"><span>DAY {{ store.currentDay?.dayNumber ?? 1 }}</span><strong>{{ store.plan.destination }}</strong><ChevronDown :size="14" /></button><div v-if="mapDayMenuOpen" class="map-day-menu" role="listbox" aria-label="选择地图行程日期"><button v-for="day in store.plan.days" :key="day.id" role="option" :aria-selected="store.activeDayId === day.id" :class="{ active: store.activeDayId === day.id }" @click="selectMapDay(day.id)"><span class="map-day-option-number">DAY {{ day.dayNumber }}</span><span class="map-day-option-copy"><strong>{{ day.title || '自由安排' }}</strong><small>{{ day.date || '日期待定' }} · {{ day.places.length }} 个地点</small></span><Check v-if="store.activeDayId === day.id" :size="15" /></button></div></div><div class="map-toolbar-actions"><button v-if="itineraryCollapsed" class="map-recommend-toggle" :class="{ active: showMapRecommendations }" @click="toggleMapRecommendations"><Sparkles :size="14" /><span>推荐</span><ChevronDown :size="13" /></button><button class="map-icon-button" aria-label="重新定位到当天路线" title="重新定位到当天路线" @click="recenterMap"><Compass :size="17" /></button></div></div></section>
         <section class="recommend-section" :class="{ 'map-recommendations-open': showMapRecommendations }"><header class="recommend-heading"><div><div class="section-kicker"><Sparkles :size="13" /> 当前地图范围内的地点</div><h2>推荐</h2></div><button class="icon-button" aria-label="刷新推荐" title="重新搜索当前地图范围" @click="journeyMap?.refreshRecommendations()"><RefreshCw :size="16" /></button></header><div class="recommend-filters"><button v-for="filter in [{id:'attraction',label:'游玩'},{id:'food',label:'美食'},{id:'hotel',label:'住宿'}] as const" :key="filter.id" :class="{ active: recommendationFilter === filter.id }" @click="recommendationFilter = filter.id"><i :class="`filter-swatch swatch-${filter.id}`"></i>{{ filter.label }}</button></div><div class="recommendation-list"><article v-for="item in filteredRecommendations" :key="item.id" class="recommendation-row" tabindex="0" @click="focusRecommendation(item.id)" @keydown.enter="focusRecommendation(item.id)"><div class="recommendation-art" :class="`art-${item.kind}`"><component :is="locationIcon(item.icon)" :size="21" /></div><div class="recommendation-copy"><h3>{{ item.name }}</h3><p>{{ item.address || '地址暂无' }}</p><div class="recommend-meta"><span class="recommend-category">{{ item.kind === 'attraction' ? '游玩' : item.kind === 'food' ? '美食' : '住宿' }}</span><span>{{ item.distance }}</span><span v-if="item.rating"><Star :size="11" fill="currentColor" /> {{ item.rating }}</span></div></div><button class="recommend-add" :aria-label="`添加${item.name}`" @click.stop="addRecommendation(item)"><Plus :size="17" /></button></article><p v-if="!recommendationFilter" class="recommend-empty">选择游玩、美食或住宿查看地点</p><p v-else-if="!filteredRecommendations.length" class="recommend-empty">当前地图范围没有匹配地点</p></div><button class="more-recommendations" @click="journeyMap?.refreshRecommendations()">搜索当前地图范围 <RefreshCw :size="12" /></button></section>

@@ -110,5 +110,4 @@ onBeforeUnmount(() => {
 .day-calendar-footer button { display: inline-flex; min-height: 26px; align-items: center; gap: 4px; padding: 3px 7px; border: 0; border-radius: 4px; background: transparent; color: #14847f; font: inherit; font-size: 10px; cursor: pointer; }
 .day-calendar-footer button:hover { background: #edf7f4; }
 .day-calendar-footer .clear-date { color: #83918f; }
-@media (max-width: 760px) { .day-calendar { position: fixed; top: 50%; left: 50%; width: min(290px, calc(100vw - 32px)); transform: translate(-50%, -50%); } }
 </style>
