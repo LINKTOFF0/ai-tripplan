@@ -59,4 +59,24 @@ class RequestPolicyTest {
         assertFalse(events.contains("JOURNEY_PLAN"));
         assertTrue(events.contains("天气答复"));
     }
+
+    @Test void textItineraryReadsCurrentCardsWithoutOpeningEditOrPlannerTools() {
+        ManagerAgent manager = new ManagerAgent((remote, edits, policy) -> prompt -> {
+            assertEquals(RequestPolicy.GENERAL, policy);
+            assertTrue(ManagerAgent.requestToolkit(remote, edits, null, policy).getToolNames().isEmpty());
+            assertTrue(prompt.contains("\"journeyPlan\""));
+            assertTrue(prompt.contains("d1p1"));
+            assertTrue(prompt.contains("\"short\":\"walking\""));
+            return Msg.builder().role(MsgRole.ASSISTANT).content(List.of(TextBlock.builder().text(
+                    "{\"answerMarkdown\":\"第一天文字旅游规划\",\"journeyPlan\":{\"id\":\"fake\",\"days\":[{\"id\":\"d1\"}]}}").build())).build();
+        });
+        var request = new data.PromptSchema();
+        request.setTask("GENERAL"); request.setPrompt("读取卡片给出完整文字旅游规划，不修改卡片");
+        request.setJourneyPlan(JourneyEditToolTest.sample()); request.setActiveDayId("day-1");
+        request.setTravelDefaults(Map.of("short", "walking", "long", "driving"));
+        String events = String.join("", manager.stream(request).collectList().block(Duration.ofSeconds(5)));
+        assertTrue(events.contains("第一天文字旅游规划"));
+        assertFalse(events.contains("JOURNEY_PLAN"));
+        assertEquals("d1p1", request.getJourneyPlan().days.get(0).places.get(0).id);
+    }
 }

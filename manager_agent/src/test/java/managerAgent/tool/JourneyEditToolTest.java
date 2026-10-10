@@ -6,6 +6,14 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class JourneyEditToolTest {
+    @Test void routeOptimizationAllowsNewFirstPlaceButCannotChangeOtherDay() {
+        var tools = new JourneyEditTool(sample(), "day-1");
+        assertTrue(tools.reorderDayPlaces("day-2", List.of("d2p1", "d2p2")).contains("当前日期"));
+        assertNull(tools.updatedPlan());
+        assertTrue(tools.reorderDayPlaces("day-1", List.of("d1p2", "d1p1")).contains("已更新"));
+        assertEquals("d1p2", tools.updatedPlan().days.get(0).places.get(0).id);
+        assertThrows(IllegalArgumentException.class, () -> new JourneyEditTool(sample(), "missing"));
+    }
     public static JourneyPlanDto sample() {
         JourneyPlanDto plan = new JourneyPlanDto();
         plan.id = "journey"; plan.destination = "珠海";

@@ -3,6 +3,8 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { ArrowLeft, Bike, Bus, Car, Check, ChevronDown, ChevronLeft, ChevronRight, CloudSun, Compass, DraftingCompass, FerrisWheel, Footprints, Hotel, Landmark, ListChecks, MapPin, MoreHorizontal, NotebookPen, PanelLeftOpen, PanelRightClose, Pencil, Plus, RefreshCw, Route, Share2, SlidersHorizontal, Sparkles, Star, Store, Trees, Utensils, X, Trash2 } from 'lucide-vue-next'
 import AssistantPanel from '@/components/AssistantPanel.vue'
 import DayDatePicker from '@/components/DayDatePicker.vue'
+import PlannedTravelDates from '@/components/PlannedTravelDates.vue'
+import PlacePlannedTime from '@/components/PlacePlannedTime.vue'
 import JourneyMap from '@/components/JourneyMap.vue'
 import { recommendations } from '@/data/sampleJourney'
 import { useJourneyStore } from '@/stores/journey'
@@ -11,6 +13,10 @@ import type { JourneyPlace, Recommendation } from '@/types/journey'
 import { preferredMode, routeKey, summarizeRoutes, type TravelDefaults, type TravelMode, type TravelRoute } from '@/utils/travelRoutes'
 
 const store = useJourneyStore()
+function updatePlannedDate(dayId: string, date: string) {
+  const day = store.plan.days.find(item => item.id === dayId)
+  if (day) day.date = date
+}
 watch(() => store.plan.title, title => { document.title = `圆规 AI · ${title || '旅行规划'}` }, { immediate: true })
 const activeTab = ref<'overview' | 'day'>('overview')
 const activeTool = ref<'note' | 'checklist' | null>(null)
@@ -24,6 +30,7 @@ const titleInput = ref<HTMLInputElement>()
 const toast = ref('')
 const deleteDayConfirm = ref(false)
 const optimizingRoute = ref(false)
+const assistantPanel = ref<{ optimizeRoute: () => Promise<void> } | null>(null)
 const editingDayId = ref('')
 const dayTitleDraft = ref('')
 const dayTitleInput = ref<HTMLInputElement>()
@@ -71,11 +78,21 @@ const effectiveTravelPreferences = computed(() => {
   })
   return result
 })
+const explicitTravelPreferences = computed(() => {
+  const result: Record<string, TravelMode> = {}
+  for (const day of store.plan.days) for (const from of day.places) for (const to of day.places) {
+    if (from.id === to.id) continue
+    const key = `${from.id}:${to.id}`
+    const mode = travelPreferences.value[key]
+    if (mode) result[key] = mode
+  }
+  return result
+})
 const assistantCollapsed = ref(false)
 const itineraryCollapsed = ref(false)
 const showMapRecommendations = ref(false)
 const mapDayMenuOpen = ref(false)
-const journeyMap = ref<{ recenter: () => Promise<boolean>; focusPlace: (placeId: string) => Promise<boolean>; focusRecommendation: (placeId: string) => boolean; refreshRecommendations: () => void; prepareRouteOptimization: () => Promise<boolean>; requestAlternatives: (fromId: string, toId: string) => Promise<void> } | null>(null)
+const journeyMap = ref<{ recenter: () => Promise<boolean>; focusPlace: (placeId: string) => Promise<boolean>; relocatePlace: (placeId: string) => Promise<void>; focusRecommendation: (placeId: string) => boolean; refreshRecommendations: () => void; prepareRouteOptimization: () => Promise<boolean>; requestAlternatives: (fromId: string, toId: string) => Promise<void>; retryTravel: (fromId: string, toId: string, mode: TravelMode) => Promise<void> } | null>(null)
 const workspaceElement = ref<HTMLElement>()
 const initialPanelWidths = loadPanelWidths()
 const assistantWidth = ref(initialPanelWidths.assistant)
@@ -262,7 +279,15 @@ function routeStatus(from: JourneyPlace, to: JourneyPlace, mode: TravelMode) {
   const route = travelRoutes.value[routeKey(from, to, mode)]
   if (route?.status === 'unavailable' && route.reason === 'no_data') return '暂无可用方案'
   if (route?.status === 'unavailable' && route.reason === 'rate_limit') return '查询限流，请稍后重试'
+  if (route?.status === 'unavailable' && route.reason === 'queue_full') return '查询繁忙，请稍后重试'
   return route?.status === 'loading' ? '查询中' : route?.status === 'ready' ? '高德路线' : route?.status === 'unavailable' ? '路线不可用' : '等待查询'
+}
+function retryRoute(from: JourneyPlace, to: JourneyPlace) {
+  void journeyMap.value?.retryTravel(from.id, to.id, travelModeFor(from, to))
+}
+function canRetryRoute(from: JourneyPlace, to: JourneyPlace) {
+  return from.locationStatus === 'matched' && to.locationStatus === 'matched'
+    && travelRoutes.value[routeKey(from, to, travelModeFor(from, to))]?.status === 'unavailable'
 }
 function deleteCurrentDay() {
   const day = store.currentDay
@@ -307,30 +332,21 @@ async function recenterMap() {
   if (await journeyMap.value?.recenter()) notify('地图已定位到当天行程')
   else notify('地图暂不可用，请稍后重试')
 }
-function straightLineDistance(from: JourneyPlace, to: JourneyPlace) {
-  const radians = (degrees: number) => degrees * Math.PI / 180
-  const latitudeDelta = radians(to.latitude - from.latitude)
-  const longitudeDelta = radians(to.longitude - from.longitude)
-  const latitudeFrom = radians(from.latitude)
-  const latitudeTo = radians(to.latitude)
-  const a = Math.sin(latitudeDelta / 2) ** 2 + Math.cos(latitudeFrom) * Math.cos(latitudeTo) * Math.sin(longitudeDelta / 2) ** 2
-  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-}
 async function optimizeCurrentRoute() {
   if (optimizingRoute.value || store.places.length < 3) {
     if (store.places.length < 3) notify('至少需要三个地点才能优化路线')
     return
   }
   optimizingRoute.value = true
+  const dayId = store.activeDayId
   try {
     const locationsReady = await journeyMap.value?.prepareRouteOptimization()
     if (!locationsReady || store.places.some(place => !Number.isFinite(place.longitude) || !Number.isFinite(place.latitude))) {
-      notify('部分地点无法定位，暂时不能按距离排序')
+      notify('部分地点无法定位，暂时不能优化真实线路')
       return
     }
-    const [first, ...remaining] = store.places
-    remaining.sort((a, b) => straightLineDistance(first, a) - straightLineDistance(first, b))
-    if (store.reorderPlaces([first.id, ...remaining.map(place => place.id)])) notify('已按距首站的直线距离优化顺序')
+    if (store.activeDayId !== dayId) { notify('日期已切换，请重新选择路线优化'); return }
+    await assistantPanel.value?.optimizeRoute()
   } finally {
     optimizingRoute.value = false
   }
@@ -354,12 +370,12 @@ function focusRecommendation(placeId: string) { void journeyMap.value?.focusReco
         <button class="icon-button" aria-label="返回" @click="notify('已在行程工作台')"><ArrowLeft :size="19" /></button>
         <div class="brand-lockup"><div class="brand-symbol"><DraftingCompass :size="17" :stroke-width="1.8" /></div><span>圆规 AI</span><span class="brand-divider"></span><input v-if="editingTitle" ref="titleInput" v-model="titleDraft" class="journey-title-input" maxlength="80" aria-label="行程名称" @keydown.enter.prevent="saveTitle" @keydown.esc="cancelTitleEdit" @blur="saveTitle"><span v-else class="journey-title">{{ store.plan.title }}</span><button class="icon-button tiny" :aria-label="editingTitle ? '保存行程名称' : '编辑行程名称'" @mousedown.prevent @click="editingTitle ? saveTitle() : editTitle()"><Check v-if="editingTitle" :size="14" /><Pencil v-else :size="13" /></button></div>
       </div>
-      <div class="topbar-right"><span class="save-indicator"><Check :size="14" /> 已保存</span><span class="day-count">{{ store.plan.days.length }} 天</span><button class="icon-button" aria-label="分享行程" @click="sharePlan"><Share2 :size="18" /></button><button class="icon-button" aria-label="更多选项" @click="notify('更多行程操作将在后续版本开放')"><MoreHorizontal :size="20" /></button></div>
+      <div class="topbar-right"><PlannedTravelDates :days="store.plan.days" @change="updatePlannedDate" /><span class="save-indicator"><Check :size="14" /> 已保存</span><span class="day-count">{{ store.plan.days.length }} 天</span><button class="icon-button" aria-label="分享行程" @click="sharePlan"><Share2 :size="18" /></button><button class="icon-button" aria-label="更多选项" @click="notify('更多行程操作将在后续版本开放')"><MoreHorizontal :size="20" /></button></div>
     </header>
 
 
     <main ref="workspaceElement" class="workspace" :style="{ '--assistant-width': assistantWidth, '--itinerary-width': itineraryWidth }">
-      <AssistantPanel class="assistant-column" :collapsed="assistantCollapsed" @toggle-collapse="assistantCollapsed = !assistantCollapsed" @toast="notify" />
+      <AssistantPanel ref="assistantPanel" class="assistant-column" :collapsed="assistantCollapsed" :travel-preferences="explicitTravelPreferences" :travel-defaults="travelDefaults" @toggle-collapse="assistantCollapsed = !assistantCollapsed" @toast="notify" />
       <div v-if="!assistantCollapsed" class="panel-resizer" :style="{ left: `${assistantWidth}%` }" role="separator" aria-orientation="vertical" aria-label="调整 AI 对话栏宽度" @pointerdown="startPanelResize($event, 'assistant')" @pointermove="resizePanels" @pointerup="stopPanelResize" @pointercancel="stopPanelResize"></div>
 
       <section class="itinerary-column">
@@ -399,12 +415,14 @@ function focusRecommendation(placeId: string) { void journeyMap.value?.focusReco
             <div v-if="store.places.length" class="place-list">
               <template v-for="(place, index) in store.places" :key="place.id">
                 <article class="place-row minimal-place-row" :class="{ selected: store.selectedPlaceId === place.id, 'is-dragging': draggedPlaceId === place.id }" draggable="true" @dragstart="startPlaceReorder($event, place.id)" @dragenter="reorderPlace($event, place.id)" @dragover.prevent @drop.prevent="stopPlaceReorder" @dragend="stopPlaceReorder" @click="focusDayPlace(place.id)">
-                  <div class="place-minimal-top"><span class="category-label" :class="`category-${place.category}`">{{ place.category === 'food' ? '美食' : place.category === 'hotel' ? '住宿' : place.category === 'transport' ? '交通' : place.category === 'attraction' ? '游玩' : '其他' }}</span><div class="place-menu-wrap"><button class="place-more-button" :aria-label="`更多${place.name}操作`" :aria-expanded="placeMenuId === place.id" @click.stop="togglePlaceMenu(place.id)"><MoreHorizontal :size="18" /></button><div v-if="placeMenuId === place.id" class="place-action-menu"><button :disabled="index === 0" @click.stop="store.movePlace(place.id, -1); placeMenuId = ''"><ChevronLeft :size="14" /> 上移</button><button :disabled="index === store.places.length - 1" @click.stop="store.movePlace(place.id, 1); placeMenuId = ''"><ChevronRight :size="14" /> 下移</button><button class="remove-place-action" @click.stop="store.removePlace(place.id); placeMenuId = ''"><X :size="14" /> 移除地点</button></div></div></div>
+                  <div class="place-minimal-top"><span class="category-label" :class="`category-${place.category}`">{{ place.category === 'food' ? '美食' : place.category === 'hotel' ? '住宿' : place.category === 'transport' ? '交通' : place.category === 'attraction' ? '游玩' : '其他' }}</span><div class="place-menu-wrap"><button class="place-more-button" :aria-label="`更多${place.name}操作`" :aria-expanded="placeMenuId === place.id" @click.stop="togglePlaceMenu(place.id)"><MoreHorizontal :size="18" /></button><div v-if="placeMenuId === place.id" class="place-action-menu"><button :disabled="index === 0" @click.stop="store.movePlace(place.id, -1); placeMenuId = ''"><ChevronLeft :size="14" /> 上移</button><button :disabled="index === store.places.length - 1" @click.stop="store.movePlace(place.id, 1); placeMenuId = ''"><ChevronRight :size="14" /> 下移</button><button @click.stop="journeyMap?.relocatePlace(place.id); placeMenuId = ''"><MapPin :size="14" /> 重新定位</button><button class="remove-place-action" @click.stop="store.removePlace(place.id); placeMenuId = ''"><X :size="14" /> 移除地点</button></div></div></div>
                   <div class="place-minimal-title"><span>{{ index + 1 }}</span><h3>{{ place.name }}</h3><MapPin v-if="place.locationStatus !== 'matched'" :size="12" class="pending-place-icon" /></div>
+                  <PlacePlannedTime v-model="place.startTime" :place-name="place.name" />
                   <small v-if="place.locationStatus !== 'matched'">待确认定位 · 未加入路线</small>
                   <section v-if="store.selectedPlaceId === place.id" class="place-advice" @click.stop><div><Sparkles :size="13" /><strong>游玩建议</strong></div><textarea v-if="editingPlaceAdviceId === place.id" ref="placeAdviceInput" v-model="placeAdviceDraft" maxlength="1000" aria-label="编辑游玩建议" placeholder="添加游玩建议" @keydown.esc.prevent="savePlaceAdvice(place.id)" @blur="savePlaceAdvice(place.id)"></textarea><button v-else class="place-advice-content" @click="editPlaceAdvice(place.id)"><p>{{ placeAdvice(place) || '点击添加游玩建议' }}</p></button><span v-if="place.address"><MapPin :size="12" /> {{ place.address }}</span></section>
                 </article>
                 <div v-if="index < store.places.length - 1" class="travel-leg"><Route :size="13" /><div class="travel-preference-wrap"><button class="travel-preference-button" :aria-expanded="activeTravelLegIndex === index" @click.stop="toggleTravelMenu(index)"><component :is="travelModes.find(mode => mode.id === travelModeFor(place, store.places[index + 1]))?.icon" :size="14" /><span>{{ travelModes.find(mode => mode.id === travelModeFor(place, store.places[index + 1]))?.label }}</span><span v-if="routeLeg(place, store.places[index + 1], travelModeFor(place, store.places[index + 1]))">约 {{ routeLeg(place, store.places[index + 1], travelModeFor(place, store.places[index + 1]))?.distance }} · {{ routeLeg(place, store.places[index + 1], travelModeFor(place, store.places[index + 1]))?.duration }}</span><span v-else>{{ routeStatus(place, store.places[index + 1], travelModeFor(place, store.places[index + 1])) }}</span><ChevronDown :size="12" /></button><small>{{ routeStatus(place, store.places[index + 1], travelModeFor(place, store.places[index + 1])) }}</small><div v-if="activeTravelLegIndex === index" class="travel-mode-menu"><header><strong>选择交通方式</strong><button class="travel-settings-trigger" @click.stop="openTravelPreferences"><SlidersHorizontal :size="12" /> 偏好</button></header><button v-for="mode in travelModes" :key="mode.id" :class="{ active: travelModeFor(place, store.places[index + 1]) === mode.id }" @click.stop="selectTravelMode(place, store.places[index + 1], mode.id)"><component :is="mode.icon" :size="17" /><span>{{ mode.label }}</span><span v-if="routeLeg(place, store.places[index + 1], mode.id)">{{ routeLeg(place, store.places[index + 1], mode.id)?.distance }} <i>|</i> {{ routeLeg(place, store.places[index + 1], mode.id)?.duration }}</span><span v-else>{{ routeStatus(place, store.places[index + 1], mode.id) }}</span><Check v-if="travelModeFor(place, store.places[index + 1]) === mode.id" :size="15" /></button></div></div></div>
+                <button v-if="index < store.places.length - 1 && canRetryRoute(place, store.places[index + 1])" class="route-retry-button" :aria-label="`重试 ${place.name} 到 ${store.places[index + 1].name} 的路线`" title="重试当前交通方式" @click.stop="retryRoute(place, store.places[index + 1])"><RefreshCw :size="13" /> 重试路线</button>
               </template>
             </div>
             <div v-else class="empty-day"><MapPin :size="25" /><strong>这一天还没有地点</strong><span>从右侧推荐中添加地点，开始安排路线。</span></div>

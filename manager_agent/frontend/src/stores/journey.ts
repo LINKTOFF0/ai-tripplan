@@ -2,17 +2,18 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { sampleJourney } from '@/data/sampleJourney'
 import type { JourneyPlace, JourneyPlan } from '@/types/journey'
+import { invalidateLegacySampleLocations } from '@/utils/legacyLocations'
 
 const STORAGE_KEY = 'aitripplan.journey.v1'
 
 function loadJourney(): JourneyPlan {
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored) return JSON.parse(stored) as JourneyPlan
+    if (stored) return invalidateLegacySampleLocations(JSON.parse(stored) as JourneyPlan)
   } catch {
     localStorage.removeItem(STORAGE_KEY)
   }
-  return structuredClone(sampleJourney)
+  return invalidateLegacySampleLocations(structuredClone(sampleJourney))
 }
 
 export const useJourneyStore = defineStore('journey', () => {
@@ -81,7 +82,7 @@ export const useJourneyStore = defineStore('journey', () => {
       const matches = existing.filter(old => old.locationStatus === 'matched' && old.name === place.name && old.city === place.city && (!place.address || old.address === place.address))
       if (matches.length === 1) {
         const old = matches[0]
-        Object.assign(place, { longitude: old.longitude, latitude: old.latitude, address: old.address, locationStatus: 'matched' })
+        Object.assign(place, { longitude: old.longitude, latitude: old.latitude, address: old.address, locationStatus: 'matched', poiId: old.poiId })
       }
     }))
     plan.value = next

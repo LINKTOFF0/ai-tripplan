@@ -17,14 +17,16 @@ export interface TravelRoute {
   distanceMeters?: number
   duration?: string
   path?: [number, number][]
-  reason?: 'no_data' | 'rate_limit' | 'service_error'
+  reason?: 'no_data' | 'rate_limit' | 'service_error' | 'queue_full'
+  checkedAt?: number
+  retryAt?: number
 }
 export function routeKey(from: JourneyPlace, to: JourneyPlace, mode: TravelMode) {
   return JSON.stringify([from.id, from.longitude, from.latitude, to.id, to.longitude, to.latitude, mode, from.city, to.city])
 }
 export function normalizeRoute(result: any, mode: TravelMode): TravelRoute {
   const route = mode === 'transit' ? result?.plans?.[0] : result?.routes?.[0]
-  if (!route) return { status: 'unavailable', reason: result?.info === 'NO_DATA' ? 'no_data' : result?.info === 'CUQPS_HAS_EXCEEDED_THE_LIMIT' ? 'rate_limit' : 'service_error' }
+  if (!route) return { status: 'unavailable', reason: result?.info === 'NO_DATA' ? 'no_data' : result?.info === 'CUQPS_HAS_EXCEEDED_THE_LIMIT' ? 'rate_limit' : result?.info === 'QUEUE_FULL' ? 'queue_full' : 'service_error' }
   const distance = Number(route.distance)
   const time = Number(route.time)
   if (!Number.isFinite(distance) || distance < 0 || !Number.isFinite(time) || time < 0

@@ -10,10 +10,10 @@ export const sampleJourney: JourneyPlan = {
     date: '2026-10-03',
     title: '岭南园林与寻味顺德',
     places: [
-      { id: 'qinghui-garden', name: '清晖园博物馆', city: '佛山市顺德区', address: '大良清晖路 23 号', category: 'attraction', startTime: '09:00', durationMinutes: 90, description: '从岭南园林开始，晨间光线和人流都更舒适。', longitude: 113.2932, latitude: 22.8398, locationStatus: 'matched', icon: 'landmark' },
-      { id: 'huagai-road', name: '华盖路步行街', city: '佛山市顺德区', address: '大良街道华盖路', category: 'other', startTime: '11:00', durationMinutes: 60, description: '骑楼老街散步，沿途可以尝试双皮奶与鱼皮。', longitude: 113.2918, latitude: 22.8408, locationStatus: 'matched', icon: 'store' },
-      { id: 'shunde-restaurant', name: '珍之宝酒楼', city: '佛山市顺德区', address: '大良新城区彩虹路', category: 'food', startTime: '12:30', durationMinutes: 90, description: '顺德早茶与经典粤菜，周末建议提前取号。', longitude: 113.3007, latitude: 22.8351, locationStatus: 'matched', icon: 'utensils' },
-      { id: 'happy-coast', name: '顺德欢乐海岸 PLUS', city: '佛山市顺德区', address: '大良街道欢乐大道', category: 'attraction', startTime: '15:30', durationMinutes: 180, description: '傍晚游园，日落后可以欣赏摩天轮夜景。', longitude: 113.3095, latitude: 22.8115, locationStatus: 'matched', icon: 'ferris-wheel' },
+      { id: 'qinghui-garden', name: '清晖园博物馆', city: '佛山市顺德区', address: '大良清晖路 23 号', category: 'attraction', startTime: '09:00', durationMinutes: 90, description: '从岭南园林开始，晨间光线和人流都更舒适。', longitude: 0, latitude: 0, locationStatus: 'pending', icon: 'landmark' },
+      { id: 'huagai-road', name: '华盖路步行街', city: '佛山市顺德区', address: '大良街道华盖路', category: 'other', startTime: '11:00', durationMinutes: 60, description: '骑楼老街散步，沿途可以尝试双皮奶与鱼皮。', longitude: 0, latitude: 0, locationStatus: 'pending', icon: 'store' },
+      { id: 'shunde-restaurant', name: '珍之宝酒楼', city: '佛山市顺德区', address: '大良新城区彩虹路', category: 'food', startTime: '12:30', durationMinutes: 90, description: '顺德早茶与经典粤菜，周末建议提前取号。', longitude: 0, latitude: 0, locationStatus: 'pending', icon: 'utensils' },
+      { id: 'happy-coast', name: '顺德欢乐海岸 PLUS', city: '佛山市顺德区', address: '大良街道欢乐大道', category: 'attraction', startTime: '15:30', durationMinutes: 180, description: '傍晚游园，日落后可以欣赏摩天轮夜景。', longitude: 0, latitude: 0, locationStatus: 'pending', icon: 'ferris-wheel' },
     ],
   }],
 }

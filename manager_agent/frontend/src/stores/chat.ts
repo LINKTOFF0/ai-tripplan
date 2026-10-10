@@ -5,6 +5,7 @@ export interface ChatMessage {
   id: number
   role: 'user' | 'assistant'
   text: string
+  displayText?: string
   streaming?: boolean
 }
 

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useJourneyStore } from '@/stores/journey'
 import type { JourneyPlace, Recommendation } from '@/types/journey'
 import { normalizeRoute, routeKey, type TravelMode, type TravelRoute } from '@/utils/travelRoutes'
 import { poiKind } from '@/utils/poiCategory'
+import { createMapRequestQueue } from '@/utils/mapRequestQueue'
+import { rankPoiCandidates } from '@/utils/poiCandidates'
 
 const props = defineProps<{ category: Recommendation['kind'] | null; recommendationsOpen?: boolean; travelPreferences: Record<string, TravelMode> }>()
 const emit = defineEmits<{ toast: [message: string]; recommendations: [items: Recommendation[]]; routes: [items: Record<string, TravelRoute>]; weather: [item: { status: string; temperature?: string; weather?: string; city?: string; reportTime?: string }] }>()
@@ -12,6 +14,7 @@ const mapElement = ref<HTMLDivElement>()
 let map: any
 let markers: any[] = []
 const markerByPlace = new Map<string, any>()
+let focusedPlaceId = ''
 let routeLines: any[] = []
 let AMap: any
 const mapReady = ref(false)
@@ -20,15 +23,30 @@ const attempted = new WeakSet<JourneyPlace>()
 const locationTarget = ref<JourneyPlace>()
 const locationQuery = ref('')
 const locationCandidates = ref<any[]>([])
+const candidateOrigin = computed(() => {
+  const target = locationTarget.value
+  if (!target) return undefined
+  const day = store.plan.days.find(day => day.places.some(place => place.id === target.id))
+  const index = day?.places.findIndex(place => place.id === target.id) ?? -1
+  const previous = index > 0 ? day?.places[index - 1] : undefined
+  return previous?.locationStatus === 'matched' ? previous : undefined
+})
+const rankedLocationCandidates = computed(() => rankPoiCandidates(locationCandidates.value, candidateOrigin.value))
 const searchingLocation = ref(false)
 let candidateVersion = 0
-function searchPlaces(query: string, city: string): Promise<any[]> {
+async function searchPlaces(query: string, city: string): Promise<any[]> {
+  const cityCode = city ? await transitCity(city) : ''
+  if (city && !/^\d{3,4}$|^\d{6}$/.test(cityCode)) return []
   return new Promise(resolve => {
     const timer = setTimeout(() => resolve([]), 10000)
-    new AMap.PlaceSearch({ city: city || '全国', citylimit: Boolean(city), pageSize: 10, extensions: 'base' })
+    new AMap.PlaceSearch({ city: cityCode || '全国', citylimit: Boolean(cityCode), pageSize: 10, extensions: 'base' })
       .search(query, (status: string, result: any) => {
         clearTimeout(timer)
-        resolve(status === 'complete' ? (result?.poiList?.pois ?? []).filter((poi: any) => poi.location) : [])
+        resolve(status === 'complete' ? (result?.poiList?.pois ?? []).filter((poi: any) => poi.location
+          && Number.isFinite(Number(poi.location.lng)) && Number.isFinite(Number(poi.location.lat))
+          && (!cityCode || (cityCode.length === 6
+            ? !poi.adcode || String(poi.adcode).slice(0, 4) === cityCode.slice(0, 4)
+            : !poi.citycode || String(poi.citycode) === cityCode))) : [])
       })
   })
 }
@@ -40,12 +58,14 @@ function bindLocation(place: JourneyPlace, poi: any) {
   place.latitude = Number(poi.location.lat)
   place.address = String(poi.address || place.address)
   place.locationStatus = 'matched'
+  place.poiId = poi.id ? String(poi.id) : undefined
 }
 async function searchLocationCandidates() {
   const target = locationTarget.value
   if (!target || !locationQuery.value.trim()) return
   const version = ++candidateVersion
   searchingLocation.value = true
+  locationCandidates.value = []
   const results = await searchPlaces(locationQuery.value.trim(), target.city)
   if (version !== candidateVersion) return
   locationCandidates.value = results
@@ -60,8 +80,9 @@ function chooseLocation(poi: any) {
   void redraw()
 }
 const routeCache = new Map<string, Promise<any>>()
-let routeQueue: Promise<unknown> = Promise.resolve()
+const requestQueue = createMapRequestQueue()
 const failedRoutes = new Map<string, number>()
+let rateLimitUntil = 0
 let disposed = false
 let routeResults: Record<string, TravelRoute> = {}
 const cityCenterCache = new Map<string, Promise<[number, number] | null>>()
@@ -71,7 +92,8 @@ function transitCity(city: string): Promise<string> {
     const timer = setTimeout(() => resolve(city), 10000)
     new AMap.Geocoder().getLocation(city, (status: string, result: any) => {
       clearTimeout(timer)
-      resolve(status === 'complete' ? String(result?.geocodes?.[0]?.citycode || city) : city)
+      const geocode = result?.geocodes?.[0]
+      resolve(status === 'complete' ? String(geocode?.citycode || geocode?.adcode || city) : city)
     })
   }))
   return transitCities.get(city)!
@@ -182,8 +204,13 @@ const poiCategories = [
 ] as const
 function searchCategory(category: typeof poiCategories[number], bounds: any): Promise<any[]> {
   return new Promise(resolve => {
+    const timer = setTimeout(() => resolve([]), 10000)
     const search = new AMap.PlaceSearch({ city: store.plan.destination, citylimit: false, type: category.type, pageSize: 50, pageIndex: 1, extensions: 'base' })
-    search.searchInBounds(category.keyword, bounds, (status: string, result: any) => resolve(status === 'complete' ? result?.poiList?.pois ?? result?.pois ?? [] : []))
+    search.searchInBounds(category.keyword, bounds, (status: string, result: any) => {
+      clearTimeout(timer)
+      if (result?.info === 'CUQPS_HAS_EXCEEDED_THE_LIMIT') rateLimitUntil = Date.now() + 30000
+      resolve(status === 'complete' ? result?.poiList?.pois ?? result?.pois ?? [] : [])
+    })
   })
 }
 function distanceLabel(from: any, longitude: number, latitude: number) {
@@ -195,6 +222,7 @@ function distanceLabel(from: any, longitude: number, latitude: number) {
   return km < 1 ? `${Math.max(50, Math.round(km * 1000 / 50) * 50)} m` : `${km.toFixed(1)} km`
 }
 function scheduleRecommendationSearch() {
+  searchVersion++
   clearTimeout(searchTimer)
   searchTimer = setTimeout(() => { void searchVisibleRecommendations() }, 350)
 }
@@ -202,16 +230,21 @@ function isAllowedPoi(poi: any, category: typeof poiCategories[number]) {
   return poiKind(poi) === category.kind
 }
 async function searchVisibleRecommendations() {
-  if (!map || !AMap) return
+  if (!map || !AMap || !props.category || disposed) return
   const version = ++searchVersion
   const bounds = map.getBounds()
   const center = map.getCenter()
-  const resultGroups = await Promise.all(poiCategories.map(category => searchCategory(category, bounds)))
-  if (version !== searchVersion) return
+  const categories = poiCategories.filter(category => category.kind === props.category)
+  const resultGroups = await Promise.all(categories.map(category => requestQueue.schedule(`poi:${version}:${category.kind}`, async () => {
+    if (Date.now() < rateLimitUntil) { emit('toast', '地点查询限流，请稍后重试'); return [] }
+    return searchCategory(category, bounds)
+  }, () => !disposed && version === searchVersion, -1)))
+  if (disposed || version !== searchVersion) return
   const seen = new Set<string>()
   const items: Recommendation[] = []
   resultGroups.forEach((pois: any[], categoryIndex) => {
-    const category = poiCategories[categoryIndex]
+    const category = categories[categoryIndex]
+    if (!Array.isArray(pois)) { emit('toast', '地点查询繁忙，请稍后重试'); return }
     pois.forEach((poi: any) => {
       if (!isAllowedPoi(poi, category)) return
       const location = poi.location
@@ -288,31 +321,44 @@ function distanceInMeters(distance: string) {
   const value = Number.parseFloat(distance)
   return distance.endsWith('km') ? value * 1000 : value
 }
-async function queryTravel(fromPlace: JourneyPlace, toPlace: JourneyPlace, mode: TravelMode): Promise<TravelRoute> {
+async function queryTravel(fromPlace: JourneyPlace, toPlace: JourneyPlace, mode: TravelMode, priority = 1): Promise<TravelRoute> {
   const key = routeKey(fromPlace, toPlace, mode)
   if (fromPlace.locationStatus !== 'matched' || toPlace.locationStatus !== 'matched' || !AMap) return { status: 'unavailable' }
-  if (routeResults[key]?.status === 'ready') return routeResults[key]
+  if (routeResults[key]?.status === 'ready' && Date.now() - (routeResults[key].checkedAt ?? 0) < 300000) return routeResults[key]
+  if (Date.now() < rateLimitUntil) {
+    const unavailable: TravelRoute = { status: 'unavailable', reason: 'rate_limit', retryAt: rateLimitUntil }
+    routeResults = { ...routeResults, [key]: unavailable }
+    emit('routes', routeResults)
+    return unavailable
+  }
   if (Date.now() - (failedRoutes.get(key) ?? 0) < 30000) return routeResults[key] ?? { status: 'unavailable' }
   routeResults = { ...routeResults, [key]: { status: 'loading' } }
   emit('routes', routeResults)
+  requestQueue.promote(key, priority)
   if (!routeCache.has(key)) {
-    if (routeCache.size > 200) routeCache.clear()
-    const task = routeQueue.then(async () => {
-      if (disposed) return null
-      if (!store.plan.days.some(day => day.places.some((place, index) => day.places[index + 1] && routeKey(place, day.places[index + 1], mode) === key))) return null
+    const validPair = () => !disposed && store.plan.days.some(day => day.places.some((place, index) => day.places[index + 1] && routeKey(place, day.places[index + 1], mode) === key))
+    const task = requestQueue.schedule(key, async () => {
+      if (Date.now() < rateLimitUntil) return { info: 'CUQPS_HAS_EXCEEDED_THE_LIMIT' }
       const originCity = fromPlace.city || store.plan.destination
       const destinationCity = toPlace.city || store.plan.destination
       const city = mode === 'transit' ? await transitCity(originCity) : originCity
       const cityd = mode === 'transit' ? await transitCity(destinationCity) : destinationCity
+      if (!validPair()) return { info: 'CANCELLED' }
       const Service = { walking: AMap.Walking, cycling: AMap.Riding, driving: AMap.Driving, transit: AMap.Transfer }[mode]
       try {
-        return await searchRoute(new Service({ map: null, hideMarkers: true, city, cityd }), [fromPlace.longitude, fromPlace.latitude], [toPlace.longitude, toPlace.latitude])
+        const result = await searchRoute(new Service({ map: null, hideMarkers: true, city, cityd }), [fromPlace.longitude, fromPlace.latitude], [toPlace.longitude, toPlace.latitude])
+        if (result?.info === 'CUQPS_HAS_EXCEEDED_THE_LIMIT') rateLimitUntil = Date.now() + 30000
+        return result
       } catch { return null }
-    }).catch(() => null)
-    routeQueue = task.then(() => new Promise(resolve => setTimeout(resolve, 700)), () => undefined)
+    }, validPair, priority)
     routeCache.set(key, task)
   }
-  const normalized = normalizeRoute(await routeCache.get(key), mode)
+  const raw = await routeCache.get(key)
+  routeCache.delete(key)
+  const normalized = normalizeRoute(raw, mode)
+  if (raw?.info === 'CANCELLED') return normalized
+  normalized.checkedAt = Date.now()
+  if (normalized.status !== 'ready') normalized.retryAt = Math.max(Date.now() + 30000, rateLimitUntil)
   if (disposed) return normalized
   const validPair = store.plan.days?.some(day => day.places.some((place, index) => day.places[index + 1] && routeKey(place, day.places[index + 1], mode) === key))
   if (validPair) {
@@ -328,7 +374,20 @@ async function requestAlternatives(fromId: string, toId: string) {
   const from = places[index]
   const to = places[index + 1]
   if (!from || !to || to.id !== toId) return
-  await Promise.all((['walking', 'cycling', 'driving', 'transit'] as const).map(mode => queryTravel(from, to, mode)))
+  await Promise.all((['walking', 'cycling', 'driving', 'transit'] as const).map(mode => queryTravel(from, to, mode, 0)))
+}
+async function retryTravel(fromId: string, toId: string, mode: TravelMode) {
+  const index = store.places.findIndex(place => place.id === fromId)
+  const from = store.places[index]
+  const to = store.places[index + 1]
+  if (!from || !to || to.id !== toId) return
+  const key = routeKey(from, to, mode)
+  if (routeResults[key]?.status === 'loading') return
+  const retryAt = Math.max(routeResults[key]?.retryAt ?? 0, rateLimitUntil)
+  if (Date.now() < retryAt) { emit('toast', `请在 ${Math.ceil((retryAt - Date.now()) / 1000)} 秒后重试`); return }
+  failedRoutes.delete(key)
+  delete routeResults[key]
+  await redraw()
 }
 async function redraw() {
   if (!map || !AMap) return
@@ -343,6 +402,7 @@ async function redraw() {
   const currentKeys = new Set(days.flatMap(day => day.places.slice(0, -1).flatMap((place, index) =>
     (['walking', 'cycling', 'driving', 'transit'] as const).map(mode => routeKey(place, day.places[index + 1], mode)))))
   routeResults = Object.fromEntries(Object.entries(routeResults).filter(([key]) => currentKeys.has(key)))
+  for (const key of failedRoutes.keys()) if (!currentKeys.has(key)) failedRoutes.delete(key)
   emit('routes', routeResults)
   store.places.forEach((place, index) => {
     if (place.locationStatus !== 'matched') return
@@ -371,15 +431,18 @@ async function redraw() {
   if (located === currentPlaces) fitDayRoute()
   }
   fitDayRoute()
-  nextTick(() => map?.resize())
+  nextTick(() => { map?.resize(); fitDayRoute() })
 }
 function fitDayRoute() {
   if (!map || !markers.length) return
+  const focused = store.places.find(place => place.id === focusedPlaceId && place.locationStatus === 'matched')
+  if (focused) { map.setZoomAndCenter(16, [focused.longitude, focused.latitude]); return }
   const rightPadding = props.recommendationsOpen ? 390 : 48
   map.setFitView([...markers, ...routeLines], false, [54, rightPadding, 70, 48])
 }
 async function recenter() {
   if (!map || !AMap) return false
+  focusedPlaceId = ''
   await geocodePendingPlaces()
   await redraw()
   if (markers.length === 1) {
@@ -395,6 +458,7 @@ async function recenter() {
 async function focusPlace(placeId: string) {
   const place = store.places.find(item => item.id === placeId)
   if (!map || !place) return false
+  focusedPlaceId = placeId
   store.selectPlace(placeId)
   if (place.locationStatus !== 'matched') {
     await geocodePendingPlaces()
@@ -409,8 +473,19 @@ async function focusPlace(placeId: string) {
     }
     await redraw()
   }
-  map.setZoomAndCenter(16, [place.longitude, place.latitude])
+  const current = store.places.find(item => item.id === placeId)
+  if (!current || current.locationStatus !== 'matched') return false
+  map.setZoomAndCenter(16, [current.longitude, current.latitude])
   return true
+}
+async function relocatePlace(placeId: string) {
+  const place = store.places.find(item => item.id === placeId)
+  if (!map || !place) { emit('toast', '地图暂不可用，请稍后重试'); return }
+  focusedPlaceId = placeId
+  locationTarget.value = place
+  locationQuery.value = placeQuery(place.name)
+  locationCandidates.value = []
+  await searchLocationCandidates()
 }
 function focusRecommendation(placeId: string) {
   const item = currentRecommendations.find(candidate => candidate.id === placeId)
@@ -427,8 +502,9 @@ async function prepareRouteOptimization() {
   await redraw()
   return store.places.every(place => place.locationStatus === 'matched')
 }
-defineExpose({ recenter, focusPlace, focusRecommendation, refreshRecommendations, prepareRouteOptimization, requestAlternatives })
-watch(() => props.category, () => drawRecommendationMarkers())
+defineExpose({ recenter, focusPlace, relocatePlace, focusRecommendation, refreshRecommendations, prepareRouteOptimization, requestAlternatives, retryTravel })
+watch(() => store.activeDayId, () => { focusedPlaceId = '' })
+watch(() => props.category, () => { drawRecommendationMarkers(); scheduleRecommendationSearch() })
 watch(() => store.plan.destination, () => { void refreshWeather() })
 watch(() => props.travelPreferences, () => { void redraw() }, { deep: true })
 watch(() => props.recommendationsOpen, () => fitDayRoute())
@@ -449,7 +525,7 @@ onMounted(() => {
     resizeObserver.observe(mapElement.value)
   }
 })
-onBeforeUnmount(() => { disposed = true; weatherVersion++; renderVersion++; clearTimeout(searchTimer); resizeObserver?.disconnect(); map?.destroy() })
+onBeforeUnmount(() => { disposed = true; requestQueue.dispose(); searchVersion++; weatherVersion++; renderVersion++; clearTimeout(searchTimer); resizeObserver?.disconnect(); map?.destroy() })
 </script>
 
 <template>
@@ -461,7 +537,7 @@ onBeforeUnmount(() => { disposed = true; weatherVersion++; renderVersion++; clea
         <form @submit.prevent="searchLocationCandidates"><input v-model="locationQuery" aria-label="地点名称或地址" placeholder="搜索具体景点、餐厅或酒店" /><button :disabled="searchingLocation">搜索</button></form>
         <p v-if="searchingLocation" role="status">正在查找地点…</p>
         <p v-else-if="!locationCandidates.length">暂未找到地点，请补充具体名称后重试。</p>
-        <button v-for="poi in locationCandidates" :key="poi.id" class="location-candidate" @click="chooseLocation(poi)"><strong>{{ poi.name }}</strong><span>{{ poi.cityname }} {{ poi.adname }} {{ poi.address }}</span></button>
+        <button v-for="candidate in rankedLocationCandidates" :key="candidate.poi.id" class="location-candidate" @click="chooseLocation(candidate.poi)"><strong>{{ candidate.poi.name }}</strong><span>{{ candidate.poi.cityname }} {{ candidate.poi.adname }} {{ candidate.poi.address }}</span><span v-if="candidate.distanceMeters != null && candidateOrigin">距 {{ candidateOrigin.name }} · 直线 {{ candidate.distanceMeters < 1000 ? `${Math.round(candidate.distanceMeters)} 米` : `${(candidate.distanceMeters / 1000).toFixed(1)} 公里` }}</span></button>
       </section>
     </div>
   </Teleport>

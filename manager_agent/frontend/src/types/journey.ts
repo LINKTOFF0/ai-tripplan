@@ -15,6 +15,7 @@ export interface JourneyPlace {
   longitude: number
   latitude: number
   locationStatus: LocationStatus
+  poiId?: string
   icon: string
 }
 

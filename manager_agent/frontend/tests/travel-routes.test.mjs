@@ -10,6 +10,7 @@ function helpers(file) {
   return context
 }
 const { normalizeRoute, routeKey, summarizeRoutes, preferredMode } = helpers('../src/utils/travelRoutes.ts')
+const { createMapRequestQueue } = helpers('../src/utils/mapRequestQueue.ts')
 const path = [{ lng: 113, lat: 22 }, { lng: 114, lat: 23 }]
 for (const mode of ['walking', 'driving']) {
   const result = normalizeRoute({ routes: [{ distance: 1250, time: 301, steps: [{ path }] }] }, mode)
@@ -59,7 +60,7 @@ const context = {
   map: { resize() {} }, AMap: { Walking: fakeService('walking'), Driving: fakeService('driving'), Riding: fakeService('cycling'), Transfer: fakeService('transit'),
     Pixel: class {}, Marker: class { on() {} setMap() {} }, Polyline: class { constructor(options) { this.path = options.path } setMap() {} } },
   renderVersion: 0, markers: [], markerByPlace: new Map(), routeLines: [], routeCache: new Map(), routeResults: {},
-  routeQueue: Promise.resolve(), failedRoutes: new Map(), disposed: false, setTimeout: callback => { callback(); return 0 },
+  requestQueue: createMapRequestQueue({ sleep: async () => {} }), failedRoutes: new Map(), rateLimitUntil: 0, disposed: false, setTimeout: callback => { callback(); return 0 },
   store: { places: [{ ...from, locationStatus: 'matched' }, { ...to, locationStatus: 'matched' }], plan: { destination: '珠海' } },
   props: { travelPreferences: {} }, emit() {}, routeKey, normalizeRoute, transitCity: async () => '0756',
   searchRoute: async service => { calls.push(service.mode); return service.mode === 'transit'
@@ -143,3 +144,75 @@ settingsContext.saveTravelDefaults()
 assert.equal(settingsContext.travelPreferences.value['a:b'], undefined, 'explicit apply clears current journey overrides')
 assert.equal(settingsContext.travelPreferences.value['other:pair'], 'driving', 'unrelated journey override is preserved')
 console.log('Saved defaults and optional application preserve independent leg preferences.')
+
+// Ten rapid preference changes may finish out of order, but only the latest redraw publishes geometry.
+context.routeResults = {}
+context.routeCache.clear()
+context.failedRoutes.clear()
+const rapidStart = calls.length
+let releaseFirst
+const firstGate = new Promise(resolve => { releaseFirst = resolve })
+let firstRequest = true
+context.searchRoute = async service => {
+  calls.push(service.mode)
+  if (firstRequest) { firstRequest = false; await firstGate }
+  const marker = { walking: 1, cycling: 2, driving: 3, transit: 4 }[service.mode]
+  const geometry = [[113, 22], [113 + marker / 100, 22.1]]
+  return service.mode === 'transit' ? { plans: [{ distance: marker * 100, time: marker * 60, path: geometry }] }
+    : { routes: [{ distance: marker * 100, time: marker * 60, steps: [{ path: geometry }], rides: [{ path: geometry }] }] }
+}
+const redraws = []
+const rapidModes = ['walking', 'cycling', 'driving', 'transit', 'walking', 'cycling', 'driving', 'transit', 'walking', 'cycling']
+for (const mode of rapidModes) {
+  context.props.travelPreferences['a:b'] = mode
+  redraws.push(context.redraw())
+}
+releaseFirst()
+await Promise.all(redraws)
+assert.equal(calls.length - rapidStart, 4, 'ten switches make only four SDK queries')
+assert.equal(context.routeLines.length, 1)
+assert.equal(context.routeLines[0].path[1][0], 113.02, 'last choice cycling owns the map')
+assert.equal(context.routeResults[routeKey(from, to, 'cycling')].distanceMeters, 200)
+
+// A removed pair never starts a queued SDK request or republishes stale metrics.
+context.routeResults = {}
+context.routeCache.clear()
+let releaseBlocker
+const blocker = context.requestQueue.schedule('test:blocker', () => new Promise(resolve => { releaseBlocker = resolve }))
+await Promise.resolve()
+const staleStart = calls.length
+const stale = context.queryTravel(context.store.places[0], context.store.places[1], 'walking')
+context.store.plan.days = []
+releaseBlocker({})
+await Promise.all([blocker, stale])
+assert.equal(calls.length, staleStart)
+assert.equal(context.routeResults[routeKey(from, to, 'walking')]?.status, 'loading', 'cancelled task cannot publish failure')
+context.store.plan.days = [{ places: context.store.places }]
+
+// A real rate-limit response blocks other modes without automatic retry, then manual retry recovers.
+context.routeResults = {}
+context.routeCache.clear()
+context.searchRoute = async () => { calls.push('limited'); return { info: 'CUQPS_HAS_EXCEEDED_THE_LIMIT' } }
+await context.queryTravel(context.store.places[0], context.store.places[1], 'walking')
+const limitedCount = calls.length
+await context.queryTravel(context.store.places[0], context.store.places[1], 'driving')
+assert.equal(calls.length, limitedCount)
+assert.equal(context.routeResults[routeKey(from, to, 'driving')].reason, 'rate_limit')
+await context.retryTravel('a', 'b', 'walking')
+assert.equal(calls.length, limitedCount, 'manual retry respects cooldown')
+context.rateLimitUntil = 0
+context.routeResults[routeKey(from, to, 'walking')].retryAt = 0
+context.searchRoute = async () => { calls.push('recovered'); return { routes: [{ distance: 600, time: 300, steps: [{ path }] }] } }
+context.props.travelPreferences['a:b'] = 'walking'
+await context.retryTravel('a', 'b', 'walking')
+assert.equal(context.routeResults[routeKey(from, to, 'walking')].status, 'ready')
+assert.equal(context.routeLines.length, 1)
+console.log('A1: ten switches / four SDK requests, stale pair cancellation, rate-limit cooldown and manual recovery passed.')
+
+const walkingKey = routeKey(from, to, 'walking')
+context.routeResults[walkingKey].checkedAt = Date.now() - 300001
+const expiredCount = calls.length
+await context.queryTravel(context.store.places[0], context.store.places[1], 'walking')
+assert.equal(calls.length, expiredCount + 1, 'expired ready cache must query SDK again')
+assert.ok(context.routeResults[walkingKey].checkedAt > Date.now() - 1000)
+console.log('A1 successful route cache expires after five minutes and records query time.')

@@ -13,8 +13,20 @@ import java.util.*;
 public final class JourneyEditTool {
     private final JourneyPlanDto plan;
     private boolean changed;
+    private final String routeDayId;
+    private final List<String> verifiedRouteOrder;
 
     public JourneyEditTool(JourneyPlanDto source) {
+        this(source, null);
+    }
+
+    public JourneyEditTool(JourneyPlanDto source, String routeDayId) {
+        this(source, routeDayId, null);
+    }
+
+    public JourneyEditTool(JourneyPlanDto source, String routeDayId, List<String> verifiedRouteOrder) {
+        this.routeDayId = routeDayId;
+        this.verifiedRouteOrder = verifiedRouteOrder == null ? null : List.copyOf(verifiedRouteOrder);
         plan = new ObjectMapper().convertValue(source, JourneyPlanDto.class);
         if (plan == null || plan.id == null || plan.days == null || plan.days.isEmpty() || plan.days.size() > 60)
             throw new IllegalArgumentException("当前行程数据无效，请刷新后重试。");
@@ -28,6 +40,7 @@ public final class JourneyEditTool {
                     throw new IllegalArgumentException("当前行程的地点标识无效。");
             }
         }
+        if (routeDayId != null && !days.contains(routeDayId)) throw new IllegalArgumentException("当前排序日期无效。");
     }
 
     public JourneyPlanDto updatedPlan() { return changed ? plan : null; }
@@ -76,6 +89,10 @@ public final class JourneyEditTool {
             if (placeIds == null || placeIds.size() != existing.size()
                     || new HashSet<>(placeIds).size() != existing.size() || !existing.keySet().containsAll(placeIds))
                 return "顺序无效，必须保留该天全部地点，未修改卡片。";
+            if (routeDayId != null && !routeDayId.equals(dayId))
+                return "路线优化只能修改当前日期，未修改卡片。";
+            if (verifiedRouteOrder != null && !verifiedRouteOrder.equals(placeIds))
+                return "顺序与已核验的最优排列不一致，未修改卡片。";
             day.places = new ArrayList<>(placeIds.stream().map(existing::get).toList());
             changed = true;
             return "地点顺序已更新。";

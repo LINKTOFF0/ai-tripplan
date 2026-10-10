@@ -11,4 +11,6 @@ public class PromptSchema {
     private String activeDayId;
     private java.util.List<ConversationMessageDto> history;
     private String task;
+    private java.util.Map<String, String> travelPreferences;
+    private java.util.Map<String, String> travelDefaults;
 }

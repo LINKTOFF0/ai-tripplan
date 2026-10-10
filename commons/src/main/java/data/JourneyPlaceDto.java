@@ -24,6 +24,7 @@ public class JourneyPlaceDto {
     public Double longitude;
     public Double latitude;
     public String locationStatus;
+    public String poiId;
     public String icon;
 
     public JourneyPlaceDto() {}

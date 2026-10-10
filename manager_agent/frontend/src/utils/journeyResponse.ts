@@ -11,6 +11,25 @@ export function canApplyJourneyResponse(current: JourneyPlan, requestSnapshot: s
   return JSON.stringify(current) === requestSnapshot
 }
 
+// A route response is a permutation, not permission to replace user-authored cards.
+export function applyRouteOrder(current: JourneyPlan, source: BackendJourneyPlan, activeDayId: string): JourneyPlan {
+  if (source.id !== current.id || source.title !== current.title || source.destination !== current.destination
+      || !Array.isArray(source.days) || source.days.length !== current.days.length) throw new Error('排序结果改变了行程资料')
+  const next = structuredClone(current)
+  source.days.forEach((day, index) => {
+    const original = current.days[index]
+    if (day.id !== original.id || day.date !== original.date || day.title !== original.title
+        || day.dayNumber !== original.dayNumber || !Array.isArray(day.places)
+        || day.places.length !== original.places.length) throw new Error('排序结果改变了日期资料')
+    const byId = new Map(original.places.map(place => [place.id, place]))
+    const ids = day.places.map(place => place.id)
+    if (new Set(ids).size !== byId.size || ids.some(id => !id || !byId.has(id))) throw new Error('排序结果不是完整地点排列')
+    if (day.id !== activeDayId && ids.some((id, placeIndex) => id !== original.places[placeIndex].id)) throw new Error('排序结果修改了其他日期')
+    next.days[index].places = ids.map(id => structuredClone(byId.get(id!)!))
+  })
+  return next
+}
+
 export function fromBackendPlan(source: BackendJourneyPlan, isEdit = false): JourneyPlan {
   if (!source || !Array.isArray(source.days) || !source.days.length) throw new Error('行程数据无效')
   const ids = new Set<string>()
@@ -41,6 +60,7 @@ export function fromBackendPlan(source: BackendJourneyPlan, isEdit = false): Jou
             ...(isEdit && typeof place.advice === 'string' ? { advice: place.advice } : {}),
             longitude: matched ? place.longitude! : 0, latitude: matched ? place.latitude! : 0,
             locationStatus: matched ? 'matched' : 'pending',
+            ...(matched && typeof place.poiId === 'string' ? { poiId: place.poiId } : {}),
             icon: isEdit && place.icon ? place.icon : category === 'food' ? 'utensils' : category === 'hotel' ? 'store' : 'landmark',
           }
         }),

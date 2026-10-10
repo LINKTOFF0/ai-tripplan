@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { CalendarDays, ChevronLeft, ChevronRight, X } from 'lucide-vue-next'
 
-const props = defineProps<{ modelValue: string; dayNumber: number }>()
+const props = defineProps<{ modelValue: string; dayNumber: number; inline?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 const root = ref<HTMLElement>()
 const open = ref(false)
@@ -63,7 +63,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="root" class="day-date-picker">
+  <div ref="root" class="day-date-picker" :class="{ 'inline-calendar': inline }">
     <button class="day-date-trigger" type="button" :aria-expanded="open" :aria-label="`选择第 ${dayNumber} 天日期`" @click="showCalendar">
       <CalendarDays :size="14" />
       <span>{{ modelValue || '选择日期' }}</span>
@@ -89,6 +89,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .day-date-picker { position: relative; display: inline-flex; }
+.inline-calendar { display: flex; flex-direction: column; align-items: flex-start; }
+.inline-calendar .day-calendar { position: static; margin-top: 7px; box-sizing: border-box; box-shadow: none; }
 .day-date-trigger { display: inline-flex; min-height: 28px; align-items: center; gap: 6px; padding: 3px 8px; border: 1px solid #dfece9; border-radius: 5px; background: rgba(247, 251, 250, .92); color: #657876; font: inherit; font-size: 10px; cursor: pointer; transition: border-color .15s, background .15s, color .15s; }
 .day-date-trigger:hover, .day-date-trigger[aria-expanded="true"] { border-color: #a8d6cf; background: #edf8f5; color: #147f7b; }
 .day-date-trigger>span { min-width: 53px; color: inherit; }
